@@ -141,7 +141,7 @@ This project is licensed under the **MIT License**. See [LICENSE](LICENSE) for d
 
 ## 👥 Acknowledgements
 
-- **Softcurse Systems Design team** for the Cyber S aesthetic.
+- **[Softcurse Systems](https://softcurse-website.pages.dev/)** for the Cyber S aesthetic.
 - **Systeminformation** and **Node-OS-Utils** for the telemetry engine.
 - **Puppeteer** for the automation layer.
 
@@ -151,4 +151,4 @@ This project is licensed under the **MIT License**. See [LICENSE](LICENSE) for d
 
 - **Bug Reports**: Open an issue [here](https://github.com/softcurse/cardinal/issues).
 - **Discussions**: Join our [GitHub Discussions]() for feature requests.
-- **Developer**: [Softcurse Systems](https://softcurse.com)
+- **Developer**: [Softcurse Systems](https://softcurse-website.pages.dev/)

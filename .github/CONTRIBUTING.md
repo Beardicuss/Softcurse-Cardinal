@@ -78,4 +78,4 @@ npm run lint
 If you have questions, feel free to open a [Discussion]() or reach out via our [Discord]().
 
 ---
-*Created with ❤️ by the Softcurse Systems Team.*
+*Created with ❤️ by the [Softcurse Systems](https://softcurse-website.pages.dev/) Team.*
