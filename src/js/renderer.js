@@ -229,6 +229,46 @@
     if (data.activeWindow) setText('hd-win', data.activeWindow.slice(0, 22));
   });
 
+  // ── FIX: threat-update now wired — updates real integrity score + matrix ──
+  window.api.on('threat-update', (data) => {
+    const score = data.score ?? 98;
+    setText('mIntegrity', score);
+    const iBar = document.getElementById('integrityBar');
+    if (iBar) {
+      iBar.style.width = score + '%';
+      iBar.style.background = score > 80 ? '#5aaa70' : score > 60 ? '#d4712a' : '#c8392b';
+    }
+    const updateBar = (id, pct, color) => {
+      const el = document.getElementById(id);
+      if (el) { el.style.width = pct + '%'; el.style.background = color; }
+    };
+    const finds = data.findings || [];
+    const hasStartup = finds.some(f => f.type === 'startup');
+    const hasHosts   = finds.some(f => f.type === 'hosts');
+    updateBar('tbarMalware',  hasStartup ? 35 : 5,   '#c8392b');
+    updateBar('tbarAdware',   hasHosts   ? 28 : 8,   '#d4712a');
+    updateBar('tbarNetwork',  (data.conns || 0) > 50 ? 45 : 12, '#d4712a');
+    updateBar('tbarIntegrity', score > 80 ? 3 : 22,  '#5aaa70');
+    finds.forEach(f => term('[SCAN]', f.msg, f.level === 'warn' ? 't-error' : 't-sys'));
+  });
+
+  // ── FIX: reminder-due now wired ──────────────────────────────────────────
+  window.api.on('reminder-due', (data) => {
+    showToast(I18n ? I18n.t('reminder_label') : 'Reminder', data.text);
+    appendMsg('ai', 'Reminder: ' + data.text);
+    if (typeof Voice !== 'undefined') Voice.speak(data.text);
+    window.api.dismissReminder(data.id);
+  });
+
+  // ── FIX: power-resume now wired ──────────────────────────────────────────
+  window.api.on('power-resume', () => {
+    const msg = typeof I18n !== 'undefined' ? I18n.t('resume_greeting') : 'Welcome back. System held steady.';
+    appendMsg('ai', msg);
+    if (typeof Voice !== 'undefined') Voice.speak(msg);
+  });
+
+
+
   // ── UI Helpers ────────────────────────────────────────────────────────────
   function setText(id, txt) { if ($(id)) $(id).textContent = txt; }
   function setVital(id, txt, pct, barId, color) {
@@ -331,6 +371,10 @@
   };
   $('chatInput').onkeydown = (e) => { if (e.key === 'Enter') $('sendBtn').click(); };
   $('micBtn').onclick = () => {
+    if (!Voice.isAvailable()) {
+      showToast('Voice', 'Web Speech API not available in this environment.');
+      return;
+    }
     Voice.toggle(
       (text, isFinal) => { if (isFinal) { $('chatInput').value = text; $('sendBtn').click(); } },
       (active) => {
@@ -345,10 +389,27 @@
   const gear = document.createElement('button');
   gear.className = 'wc-btn'; gear.innerHTML = '⚙'; gear.style.marginRight = '8px';
   $('topbar').querySelector('.win-controls').prepend(gear);
-  gear.onclick = () => $('settings-overlay').classList.remove('hidden');
+  gear.onclick = async () => {
+    // Pre-load saved config into settings fields
+    const cfg = await window.api.getConfig().catch(() => ({}));
+    const nameEl = document.getElementById('cfgName');
+    const modelEl = document.getElementById('cfgModel');
+    const anthEl = document.getElementById('cfgAnthropic');
+    const oaiEl = document.getElementById('cfgOpenai');
+    if (nameEl) nameEl.value = cfg.userName || '';
+    if (anthEl) anthEl.value = cfg.anthropicKey || '';
+    if (oaiEl) oaiEl.value = cfg.openaiKey || '';
+    // Populate model dropdown with real Ollama models
+    if (modelEl) {
+      const ollamaRes = await window.api.getOllamaModels().catch(() => ({ ok: false, models: [] }));
+      const models = ollamaRes.models.length ? ollamaRes.models : ['qwen2.5', 'llama3.1', 'llama3', 'mistral'];
+      modelEl.innerHTML = models.map(m => `<option value="${m}" ${m === (cfg.aiModel || 'qwen2.5') ? 'selected' : ''}>${m}</option>`).join('');
+    }
+    document.getElementById('settings-overlay').classList.remove('hidden');
+  };
   $('settingsClose').onclick = () => $('settings-overlay').classList.add('hidden');
   $('saveSettings').onclick = async () => {
-    const cfg = { userName: $('cfgName').value, aiModel: $('cfgModel').value, anthropicKey: $('cfgAnthropic').value, openaiKey: $('cfgOpenai').value };
+    const cfg = { userName: $('cfgName').value, aiModel: $('cfgModel').value, anthropicKey: $('cfgAnthropic').value, openaiKey: $('cfgOpenai').value, lang: typeof I18n !== 'undefined' ? I18n.getLocale() : 'en' };
     await window.api.saveConfig(cfg);
     AI.setUserName(cfg.userName); AI.setModel(cfg.aiModel);
     $('settings-overlay').classList.add('hidden');

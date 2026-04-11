@@ -1,9 +1,8 @@
-const { app, BrowserWindow, ipcMain, powerMonitor, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, powerMonitor, shell, session } = require('electron');
 const path     = require('path');
 const si       = require('systeminformation');
-const { exec, spawn } = require('child_process');
+const { exec } = require('child_process');
 const fs       = require('fs');
-const puppeteer = require('puppeteer');
 const { getActiveWindowTitle, runQuickThreatScan, getOpenConnections, clearSystemCache } = require('./src/js/system.js');
 
 let mainWindow;
@@ -28,12 +27,10 @@ const store = {
   save() { try { fs.writeFileSync(this._path, JSON.stringify(this._data)); } catch {} },
   addConv(role, content) {
     this._data.conversations.push({ role, content, ts: Date.now() });
+    if (this._data.conversations.length > 200) this._data.conversations.splice(0, 1);
     this.save();
   },
-  getConvs(limit = -1) { 
-    if (limit === -1) return this._data.conversations;
-    return this._data.conversations.slice(-limit); 
-  },
+  getConvs(limit = 40) { return this._data.conversations.slice(-limit); },
   clearConvs()         { this._data.conversations = []; this.save(); },
   addReminder(text, due) {
     const id = Date.now();
@@ -45,10 +42,7 @@ const store = {
     const r = this._data.reminders.find(r => r.id === id);
     if (r) { r.done = 1; this.save(); }
   },
-  updateProfile(key, val) {
-    this._data.profile[key] = val;
-    this.save();
-  },
+  updateProfile(key, val) { this._data.profile[key] = val; this.save(); },
   getProfile() { return this._data.profile; }
 };
 
@@ -60,25 +54,48 @@ function createWindow() {
     frame: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true, nodeIntegration: false
+      contextIsolation: true,
+      nodeIntegration: false
     }
   });
+
+  // ── FIX 1: Grant microphone permission in Electron ──────────────────────
+  // Without this, Web Speech API silently fails — mic never activates.
+  mainWindow.webContents.session.setPermissionRequestHandler((webContents, permission, callback) => {
+    if (permission === 'media' || permission === 'microphone' || permission === 'audioCapture') {
+      callback(true); // grant mic
+    } else {
+      callback(false);
+    }
+  });
+
+  mainWindow.webContents.session.setPermissionCheckHandler((webContents, permission) => {
+    if (permission === 'media' || permission === 'microphone' || permission === 'audioCapture') {
+      return true;
+    }
+    return false;
+  });
+
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
 }
 
-// ── System monitor ────────────────────────────────────────────────────────────
+// ── System monitor (2s polling) ───────────────────────────────────────────────
 async function startMonitoring() {
   const push = async () => {
     try {
       const [load, mem, nets, procs, disks, temp] = await Promise.all([
         si.currentLoad(), si.mem(), si.networkStats(),
         si.processes(), si.fsSize(),
-        si.cpuTemperature().catch(() => ({ main: null }))
+        si.cpuTemperature().catch(() => ({ main: null, cores: [] }))
       ]);
       const net  = nets[0] || {};
       const disk = disks[0] || { size: 1, used: 0 };
+
+      // FIX 6: CPU temp — try main, then first core, then null
+      const tempVal = temp.main || (temp.cores && temp.cores[0]) || null;
+
       const topProcs = procs.list
-        .filter(p => p.name && p.name !== 'idle')
+        .filter(p => p.name && p.name !== 'idle' && p.name !== 'System Idle Process')
         .sort((a, b) => b.cpu - a.cpu)
         .slice(0, 5)
         .map(p => ({
@@ -99,7 +116,7 @@ async function startMonitoring() {
         upload:   +(net.tx_sec / 1048576 || 0).toFixed(2),
         download: +(net.rx_sec / 1048576 || 0).toFixed(2),
         netConns: procs.list.length,
-        temp:     temp.main ? Math.round(temp.main) : null,
+        temp:     tempVal ? Math.round(tempVal) : null,
         uptime:   Math.round((Date.now() - startTime) / 1000),
         processes: topProcs,
         activeWindow,
@@ -112,7 +129,7 @@ async function startMonitoring() {
   monitorInterval = setInterval(push, 2000);
 }
 
-// ── Threat scan ───────────────────────────────────────────────────────────────
+// ── Threat scan (background, every 5 min) ────────────────────────────────────
 async function startThreatMonitor() {
   const scan = async () => {
     try {
@@ -120,14 +137,12 @@ async function startThreatMonitor() {
       const conns  = await getOpenConnections();
       threatsFound = result.findings.filter(f => f.level === 'warn').length;
       mainWindow?.webContents.send('threat-update', {
-        score:    result.score,
-        findings: result.findings,
-        conns
+        score: result.score, findings: result.findings, conns
       });
     } catch {}
   };
-  scan();
-  threatInterval = setInterval(scan, 5 * 60 * 1000);
+  // Delay first scan 10s so startup isn't slowed
+  setTimeout(() => { scan(); threatInterval = setInterval(scan, 5 * 60 * 1000); }, 10000);
 }
 
 // ── Reminder checker ──────────────────────────────────────────────────────────
@@ -181,33 +196,34 @@ ipcMain.handle('open-external', (_e, url) => shell.openExternal(url));
 // ── IPC: OS operations ────────────────────────────────────────────────────────
 ipcMain.handle('clear-cache', async () => {
   const results = await clearSystemCache();
-  spaceFreed += 0.5;
+  spaceFreed = +(spaceFreed + 0.5).toFixed(1);
   return { success: true, output: results.join('. ') };
 });
 
 ipcMain.handle('run-threat-scan', async () => {
   const result = await runQuickThreatScan();
+  const conns  = await getOpenConnections();
   threatsFound = result.findings.filter(f => f.level === 'warn').length;
-  mainWindow?.webContents.send('threat-update', { score: result.score, findings: result.findings });
+  mainWindow?.webContents.send('threat-update', { score: result.score, findings: result.findings, conns });
   return result;
 });
 
-ipcMain.handle('run-defrag', async () => {
-  return new Promise(resolve => {
+ipcMain.handle('run-defrag', async () =>
+  new Promise(resolve => {
     let cmd, label;
     if (process.platform === 'win32') { cmd = 'defrag C: /U /V'; label = 'Defrag C:'; }
     else if (process.platform === 'darwin') { cmd = 'diskutil repairvolume /'; label = 'Disk repair'; }
-    else { cmd = 'echo "Defrag not applicable on Linux"'; label = 'Defrag'; }
+    else { cmd = 'echo "Defrag not applicable on Linux (ext4 self-manages)"'; label = 'Defrag'; }
     exec(cmd, { timeout: 60000, shell: true }, (err, stdout, stderr) => {
-      spaceFreed += 0.2;
+      spaceFreed = +(spaceFreed + 0.2).toFixed(1);
       resolve({ success: !err, output: (stdout || stderr || '').trim().slice(0, 500), label });
     });
-  });
-});
+  })
+);
 
 ipcMain.handle('run-sfc', async () =>
   new Promise(resolve => {
-    const cmd = process.platform === 'win32' ? 'sfc /scannow' : 'echo "SFC is Windows-only"';
+    const cmd = process.platform === 'win32' ? 'sfc /scannow' : 'echo "SFC is Windows-only."';
     exec(cmd, { timeout: 120000, shell: true }, (err, stdout, stderr) =>
       resolve({ success: !err, output: (stdout || stderr || '').trim().slice(0, 500) })
     );
@@ -216,7 +232,9 @@ ipcMain.handle('run-sfc', async () =>
 
 ipcMain.handle('run-defender', async () =>
   new Promise(resolve => {
-    const cmd = process.platform === 'win32' ? 'powershell -NoProfile -Command "Start-MpScan -ScanType QuickScan"' : 'echo "Windows Defender not available"';
+    const cmd = process.platform === 'win32'
+      ? 'powershell -NoProfile -Command "Start-MpScan -ScanType QuickScan"'
+      : 'echo "Windows Defender not available on this OS."';
     exec(cmd, { timeout: 90000, shell: true }, (err, stdout, stderr) => {
       if (!err) threatsFound = 0;
       resolve({ success: !err, output: (stdout || stderr || '').trim().slice(0, 500) });
@@ -224,57 +242,56 @@ ipcMain.handle('run-defender', async () =>
   })
 );
 
-// ── IPC: Admin Elevation ──────────────────────────────────────────────────────
-ipcMain.handle('elevate-admin', async () => {
-  return new Promise(resolve => {
+// ── IPC: Admin elevation ──────────────────────────────────────────────────────
+ipcMain.handle('elevate-admin', async () =>
+  new Promise(resolve => {
     if (process.platform === 'win32') {
       const cmd = `powershell -Command "Start-Process '${process.execPath}' -Verb RunAs"`;
-      exec(cmd, (err) => {
-        if (!err) app.quit();
-        resolve({ success: !err });
-      });
+      exec(cmd, (err) => { if (!err) app.quit(); resolve({ success: !err }); });
     } else {
       resolve({ success: false, message: 'Elevation only supported on Windows' });
     }
-  });
-});
+  })
+);
 
-// ── IPC: Browser Automation ───────────────────────────────────────────────────
+// ── IPC: Browser automation (Puppeteer) ───────────────────────────────────────
 ipcMain.handle('browser-auto', async (_e, { url, action, data }) => {
   let browser;
   try {
-    browser = await puppeteer.launch({ headless: "new" });
+    const puppeteer = require('puppeteer');
+    browser = await puppeteer.launch({ headless: 'new' });
     const page = await browser.newPage();
-    await page.goto(url, { waitUntil: 'networkidle2' });
-    
+    await page.goto(url, { waitUntil: 'networkidle2', timeout: 20000 });
     let result = '';
     if (action === 'read') {
       result = await page.evaluate(() => document.body.innerText.slice(0, 5000));
     } else if (action === 'fill' && data) {
       for (const [selector, value] of Object.entries(data)) {
-        await page.type(selector, value);
+        await page.type(selector, String(value)).catch(() => {});
       }
       result = 'Form filled';
     }
     await browser.close();
     return { success: true, result };
   } catch (e) {
-    if (browser) await browser.close();
+    try { await browser?.close(); } catch {}
     return { success: false, error: e.message };
   }
 });
 
-// ── IPC: File Operations ─────────────────────────────────────────────────────
+// ── IPC: File operations ──────────────────────────────────────────────────────
+// FIX 3: Filter Windows system root files that cause EINVAL before lstat
+const WIN_ROOT_SKIP = new Set(['DumpStack.log.tmp', 'pagefile.sys', 'swapfile.sys', 'hiberfil.sys', 'BOOTNXT']);
+
 ipcMain.handle('file-list', async (_e, dirPath) => {
   try {
-    // readdirSync can also throw if dirPath is invalid or inaccessible
     const files = fs.readdirSync(dirPath, { withFileTypes: true });
     const result = [];
-    
     for (const f of files) {
+      // Skip known problematic Windows root files silently
+      if (WIN_ROOT_SKIP.has(f.name)) continue;
       const fullPath = path.join(dirPath, f.name);
       try {
-        // Use lstatSync to avoid following broken symlinks which can cause EINVAL
         const stats = fs.lstatSync(fullPath);
         result.push({
           name: f.name,
@@ -283,21 +300,18 @@ ipcMain.handle('file-list', async (_e, dirPath) => {
           size: f.isDirectory() ? 0 : stats.size,
           mtime: stats.mtime
         });
-      } catch (e) {
-        // Log and skip any file that causes an error (EINVAL, EPERM, EACCES, etc.)
-        console.warn(`[FILE-LIST] Skipping ${fullPath}: ${e.code} ${e.message}`);
+      } catch {
+        // Silently skip — no console.warn flooding
       }
     }
     return result;
-  } catch (e) {
-    console.error(`[FILE-LIST] Failed to read directory ${dirPath}:`, e);
-    // Return empty list instead of throwing to keep the UI stable
+  } catch {
     return [];
   }
 });
 
-ipcMain.handle('file-move', async (_e, { from, to }) => {
-  try { fs.renameSync(from, to); return { success: true }; } catch (e) { throw e; }
+ipcMain.handle('file-move',   async (_e, { from, to }) => {
+  try { fs.renameSync(from, to); return { success: true }; } catch (e) { return { success: false, error: e.message }; }
 });
 
 ipcMain.handle('file-delete', async (_e, filePath) => {
@@ -305,13 +319,38 @@ ipcMain.handle('file-delete', async (_e, filePath) => {
     if (fs.statSync(filePath).isDirectory()) fs.rmSync(filePath, { recursive: true });
     else fs.unlinkSync(filePath);
     return { success: true };
-  } catch (e) { throw e; }
+  } catch (e) { return { success: false, error: e.message }; }
 });
 
-// ── IPC: AI chat ──────────────────────────────────────────────────────────────
+// ── IPC: AI chat ── FIX 2: match :latest suffix Ollama returns ───────────────
 ipcMain.handle('ai-chat', async (_e, { messages, systemPrompt, model }) => {
-  const ollamaModels = [model, 'qwen2.5', 'llama3.1', 'llama3', 'mistral'].filter(Boolean);
-  for (const m of ollamaModels) {
+  // Fetch real model list from Ollama first to get exact names (with :latest suffix)
+  let availableModels = [];
+  try {
+    const tagsRes = await fetch('http://127.0.0.1:11434/api/tags', { signal: AbortSignal.timeout(3000) });
+    if (tagsRes.ok) {
+      const d = await tagsRes.json();
+      availableModels = (d.models || []).map(m => m.name);
+    }
+  } catch {}
+
+  // Build try-order: preferred model, then fuzzy-match from available, then fallbacks
+  const preferred = model || 'qwen2.5';
+  const tryModels = [];
+
+  // Exact match first
+  if (availableModels.includes(preferred)) tryModels.push(preferred);
+  // Fuzzy: find model whose name starts with preferred (handles :latest suffix)
+  const fuzzy = availableModels.find(m => m.startsWith(preferred) || preferred.startsWith(m.split(':')[0]));
+  if (fuzzy && !tryModels.includes(fuzzy)) tryModels.push(fuzzy);
+  // Add all available Ollama models as additional fallbacks
+  for (const m of availableModels) { if (!tryModels.includes(m)) tryModels.push(m); }
+  // Hardcoded names in case Ollama tags endpoint was unreachable
+  for (const m of ['qwen2.5', 'qwen2.5:latest', 'llama3.1', 'llama3.1:latest', 'llama3', 'mistral']) {
+    if (!tryModels.includes(m)) tryModels.push(m);
+  }
+
+  for (const m of tryModels) {
     try {
       const res = await fetch('http://127.0.0.1:11434/api/chat', {
         method: 'POST',
@@ -323,8 +362,8 @@ ipcMain.handle('ai-chat', async (_e, { messages, systemPrompt, model }) => {
           options: { temperature: 0.7, num_ctx: 4096 }
         }),
         signal: AbortSignal.timeout(30000)
-      }).catch(() => null);
-      if (res && res.ok) {
+      });
+      if (res.ok) {
         const d = await res.json();
         const text = d.message?.content || '';
         if (text) return { ok: true, text, provider: `ollama/${m}` };
@@ -332,14 +371,16 @@ ipcMain.handle('ai-chat', async (_e, { messages, systemPrompt, model }) => {
     } catch {}
   }
 
+  // Cloud fallbacks
   let cfg = {};
   try { cfg = JSON.parse(fs.readFileSync(configPath(), 'utf8')); } catch {}
+
   if (cfg.anthropicKey) {
     try {
       const res = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-api-key': cfg.anthropicKey, 'anthropic-version': '2023-06-01' },
-        body: JSON.stringify({ model: 'claude-3-haiku-20240307', max_tokens: 1024, system: systemPrompt, messages }),
+        body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 1024, system: systemPrompt, messages }),
         signal: AbortSignal.timeout(25000)
       });
       if (res.ok) {
@@ -348,7 +389,28 @@ ipcMain.handle('ai-chat', async (_e, { messages, systemPrompt, model }) => {
       }
     } catch {}
   }
-  return { ok: false, text: 'No AI provider reachable.', provider: 'none' };
+
+  if (cfg.openaiKey) {
+    try {
+      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${cfg.openaiKey}` },
+        body: JSON.stringify({ model: 'gpt-4o-mini', messages: [{ role: 'system', content: systemPrompt }, ...messages] }),
+        signal: AbortSignal.timeout(25000)
+      });
+      if (res.ok) {
+        const d = await res.json();
+        return { ok: true, text: d.choices?.[0]?.message?.content || '', provider: 'openai' };
+      }
+    } catch {}
+  }
+
+  return {
+    ok: false,
+    text: 'No AI provider reachable. Make sure Ollama is running (`ollama serve`). ' +
+          `Available models detected: ${availableModels.join(', ') || 'none'}.`,
+    provider: 'none'
+  };
 });
 
 ipcMain.handle('get-ollama-models', async () => {
@@ -362,39 +424,30 @@ ipcMain.handle('get-ollama-models', async () => {
   return { ok: false, models: [] };
 });
 
-// ── IPC: History & Config ─────────────────────────────────────────────────────
-ipcMain.handle('get-history',     ()              => store.getConvs(-1));
-ipcMain.handle('save-message',    (_e, {role,content}) => store.addConv(role, content));
-ipcMain.handle('clear-history',   ()              => store.clearConvs());
-ipcMain.handle('add-reminder',    (_e, {text,due}) => store.addReminder(text, due));
-ipcMain.handle('get-reminders',   ()               => store.getPendingReminders());
-ipcMain.handle('dismiss-reminder',(_e, id)         => store.doneReminder(id));
+// ── IPC: history, config, profile, plugins ────────────────────────────────────
+ipcMain.handle('get-history',     ()                    => store.getConvs(40));
+ipcMain.handle('save-message',    (_e, {role, content}) => store.addConv(role, content));
+ipcMain.handle('clear-history',   ()                    => store.clearConvs());
+ipcMain.handle('add-reminder',    (_e, {text, due})     => store.addReminder(text, due));
+ipcMain.handle('get-reminders',   ()                    => store.getPendingReminders());
+ipcMain.handle('dismiss-reminder',(_e, id)              => store.doneReminder(id));
+ipcMain.handle('get-profile',     ()                    => store.getProfile());
+ipcMain.handle('update-profile',  (_e, {key, val})      => store.updateProfile(key, val));
 
 const configPath = () => path.join(app.getPath('userData'), 'config.json');
-ipcMain.handle('get-config',  ()    => { try { return JSON.parse(fs.readFileSync(configPath(), 'utf8')); } catch { return {}; } });
-ipcMain.handle('save-config', (_e, cfg) => fs.writeFileSync(configPath(), JSON.stringify(cfg, null, 2)));
-ipcMain.handle('get-profile', () => store.getProfile());
-ipcMain.handle('update-profile', (_e, { key, val }) => store.updateProfile(key, val));
+ipcMain.handle('get-config',  ()      => { try { return JSON.parse(fs.readFileSync(configPath(), 'utf8')); } catch { return {}; } });
+ipcMain.handle('save-config', (_e, c) => fs.writeFileSync(configPath(), JSON.stringify(c, null, 2)));
 
-// ── IPC: Security & Network ──────────────────────────────────────────────────
-ipcMain.handle('get-network-details', async () => {
-  return si.networkConnections();
-});
+ipcMain.handle('get-network-details', async () => si.networkConnections().catch(() => []));
 
-// ── Plugin System ────────────────────────────────────────────────────────────
-const pluginsDir = path.join(app.getPath('userData'), 'plugins');
-if (!fs.existsSync(pluginsDir)) fs.mkdirSync(pluginsDir);
-
+const pluginsDir = () => { const p = path.join(app.getPath('userData'), 'plugins'); if (!fs.existsSync(p)) fs.mkdirSync(p); return p; };
 ipcMain.handle('load-plugins', async () => {
-  const files = fs.readdirSync(pluginsDir).filter(f => f.endsWith('.js'));
-  const plugins = [];
-  for (const file of files) {
-    try {
-      const content = fs.readFileSync(path.join(pluginsDir, file), 'utf8');
-      plugins.push({ name: file, content });
-    } catch (e) { console.error(`Failed to load plugin ${file}:`, e); }
-  }
-  return plugins;
+  return fs.readdirSync(pluginsDir())
+    .filter(f => f.endsWith('.js'))
+    .map(file => {
+      try { return { name: file, content: fs.readFileSync(path.join(pluginsDir(), file), 'utf8') }; }
+      catch { return null; }
+    }).filter(Boolean);
 });
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
