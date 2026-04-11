@@ -1,7 +1,7 @@
 {
   "name": "cardinal",
   "version": "1.0.0",
-  "description": "OS Commander & Companion — Softcurse Systems",
+  "description": "Autonomous AI-driven OS Commander & Companion. Bridges system telemetry with AI action execution, security forensics, and automated web workflows.",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
