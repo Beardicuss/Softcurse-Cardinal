@@ -1,16 +1,27 @@
 const { app, BrowserWindow, ipcMain, powerMonitor, shell, session } = require('electron');
-const path     = require('path');
-const si       = require('systeminformation');
+const path = require('path');
+const si = require('systeminformation');
 const { exec } = require('child_process');
-const fs       = require('fs');
+const util = require('util');
+const execAsync = util.promisify(exec);
+const fs = require('fs');
 const { getActiveWindowTitle, runQuickThreatScan, getOpenConnections, clearSystemCache } = require('./src/js/system.js');
+// ── Abort helper — avoids Chromium chunked_data_pipe error from AbortSignal.timeout ──
+function fetchWithTimeout(url, opts, ms = 25000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  return fetch(url, { ...opts, signal: controller.signal })
+    .finally(() => clearTimeout(timer));
+}
+
+
 
 let mainWindow;
 let monitorInterval;
 let reminderInterval;
 let threatInterval;
-let startTime    = Date.now();
-let spaceFreed   = 0;
+let startTime = Date.now();
+let spaceFreed = 0;
 let threatsFound = 0;
 
 // ── JSON store ────────────────────────────────────────────────────────────────
@@ -19,19 +30,19 @@ const store = {
   _data: { conversations: [], reminders: [], profile: { habits: {}, workingHours: [] } },
   init(p) {
     this._path = p;
-    try { this._data = JSON.parse(fs.readFileSync(p, 'utf8')); } catch {}
+    try { this._data = JSON.parse(fs.readFileSync(p, 'utf8')); } catch { }
     if (!Array.isArray(this._data.conversations)) this._data.conversations = [];
-    if (!Array.isArray(this._data.reminders))     this._data.reminders     = [];
+    if (!Array.isArray(this._data.reminders)) this._data.reminders = [];
     if (!this._data.profile) this._data.profile = { habits: {}, workingHours: [] };
   },
-  save() { try { fs.writeFileSync(this._path, JSON.stringify(this._data)); } catch {} },
+  save() { try { fs.writeFileSync(this._path, JSON.stringify(this._data)); } catch { } },
   addConv(role, content) {
     this._data.conversations.push({ role, content, ts: Date.now() });
     if (this._data.conversations.length > 200) this._data.conversations.splice(0, 1);
     this.save();
   },
   getConvs(limit = 40) { return this._data.conversations.slice(-limit); },
-  clearConvs()         { this._data.conversations = []; this.save(); },
+  clearConvs() { this._data.conversations = []; this.save(); },
   addReminder(text, due) {
     const id = Date.now();
     this._data.reminders.push({ id, text, due, done: 0 });
@@ -55,7 +66,8 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      sandbox: false
     }
   });
 
@@ -88,7 +100,7 @@ async function startMonitoring() {
         si.processes(), si.fsSize(),
         si.cpuTemperature().catch(() => ({ main: null, cores: [] }))
       ]);
-      const net  = nets[0] || {};
+      const net = nets[0] || {};
       const disk = disks[0] || { size: 1, used: 0 };
 
       // FIX 6: CPU temp — try main, then first core, then null
@@ -100,24 +112,24 @@ async function startMonitoring() {
         .slice(0, 5)
         .map(p => ({
           name: p.name, pid: p.pid,
-          cpu:  Math.round(p.cpu * 10) / 10,
-          mem:  Math.round(p.memVsz / 1024)
+          cpu: Math.round(p.cpu * 10) / 10,
+          mem: Math.round(p.memVsz / 1024)
         }));
 
       const activeWindow = await getActiveWindowTitle().catch(() => 'Unknown');
 
       mainWindow?.webContents.send('system-update', {
-        cpu:      Math.round(load.currentLoad),
-        ram:      Math.round(mem.used / mem.total * 100),
-        ramUsed:  +(mem.used / 1073741824).toFixed(1),
+        cpu: Math.round(load.currentLoad),
+        ram: Math.round(mem.used / mem.total * 100),
+        ramUsed: +(mem.used / 1073741824).toFixed(1),
         ramTotal: +(mem.total / 1073741824).toFixed(1),
-        diskPct:  Math.round(disk.used / disk.size * 100),
+        diskPct: Math.round(disk.used / disk.size * 100),
         diskFree: +((disk.size - disk.used) / 1073741824).toFixed(1),
-        upload:   +(net.tx_sec / 1048576 || 0).toFixed(2),
+        upload: +(net.tx_sec / 1048576 || 0).toFixed(2),
         download: +(net.rx_sec / 1048576 || 0).toFixed(2),
         netConns: procs.list.length,
-        temp:     tempVal ? Math.round(tempVal) : null,
-        uptime:   Math.round((Date.now() - startTime) / 1000),
+        temp: tempVal ? Math.round(tempVal) : null,
+        uptime: Math.round((Date.now() - startTime) / 1000),
         processes: topProcs,
         activeWindow,
         spaceFreed,
@@ -134,12 +146,12 @@ async function startThreatMonitor() {
   const scan = async () => {
     try {
       const result = await runQuickThreatScan();
-      const conns  = await getOpenConnections();
+      const conns = await getOpenConnections();
       threatsFound = result.findings.filter(f => f.level === 'warn').length;
       mainWindow?.webContents.send('threat-update', {
         score: result.score, findings: result.findings, conns
       });
-    } catch {}
+    } catch { }
   };
   // Delay first scan 10s so startup isn't slowed
   setTimeout(() => { scan(); threatInterval = setInterval(scan, 5 * 60 * 1000); }, 10000);
@@ -161,7 +173,7 @@ function startReminderCheck() {
 ipcMain.handle('win-minimize', () => mainWindow?.minimize());
 ipcMain.handle('win-maximize', () =>
   mainWindow?.isMaximized() ? mainWindow.unmaximize() : mainWindow.maximize());
-ipcMain.handle('win-close',   () => mainWindow?.close());
+ipcMain.handle('win-close', () => mainWindow?.close());
 
 // ── IPC: system info ──────────────────────────────────────────────────────────
 ipcMain.handle('get-sysinfo', async () => {
@@ -170,7 +182,7 @@ ipcMain.handle('get-sysinfo', async () => {
     cpuModel: `${cpu.manufacturer} ${cpu.brand}`,
     platform: osInfo.platform,
     hostname: osInfo.hostname,
-    os:       `${osInfo.distro || osInfo.platform} ${osInfo.release}`,
+    os: `${osInfo.distro || osInfo.platform} ${osInfo.release}`,
     totalRam: +(mem.total / 1073741824).toFixed(1)
   };
 });
@@ -202,7 +214,7 @@ ipcMain.handle('clear-cache', async () => {
 
 ipcMain.handle('run-threat-scan', async () => {
   const result = await runQuickThreatScan();
-  const conns  = await getOpenConnections();
+  const conns = await getOpenConnections();
   threatsFound = result.findings.filter(f => f.level === 'warn').length;
   mainWindow?.webContents.send('threat-update', { score: result.score, findings: result.findings, conns });
   return result;
@@ -254,27 +266,36 @@ ipcMain.handle('elevate-admin', async () =>
   })
 );
 
+// ── Persistent Browser State ──────────────────────────────────────────────────
+let persistentBrowser = null;
+let persistentPage = null;
+
+app.on('before-quit', async () => {
+  if (persistentBrowser) {
+    try { await persistentBrowser.close(); } catch { }
+  }
+});
+
 // ── IPC: Browser automation (Puppeteer) ───────────────────────────────────────
 ipcMain.handle('browser-auto', async (_e, { url, action, data }) => {
-  let browser;
   try {
-    const puppeteer = require('puppeteer');
-    browser = await puppeteer.launch({ headless: 'new' });
-    const page = await browser.newPage();
-    await page.goto(url, { waitUntil: 'networkidle2', timeout: 20000 });
+    if (!persistentBrowser) {
+      const puppeteer = require('puppeteer');
+      persistentBrowser = await puppeteer.launch({ headless: 'new' });
+      persistentPage = await persistentBrowser.newPage();
+    }
+    await persistentPage.goto(url, { waitUntil: 'networkidle2', timeout: 20000 });
     let result = '';
     if (action === 'read') {
-      result = await page.evaluate(() => document.body.innerText.slice(0, 5000));
+      result = await persistentPage.evaluate(() => document.body.innerText.slice(0, 5000));
     } else if (action === 'fill' && data) {
       for (const [selector, value] of Object.entries(data)) {
-        await page.type(selector, String(value)).catch(() => {});
+        await persistentPage.type(selector, String(value)).catch(() => { });
       }
       result = 'Form filled';
     }
-    await browser.close();
     return { success: true, result };
   } catch (e) {
-    try { await browser?.close(); } catch {}
     return { success: false, error: e.message };
   }
 });
@@ -310,7 +331,7 @@ ipcMain.handle('file-list', async (_e, dirPath) => {
   }
 });
 
-ipcMain.handle('file-move',   async (_e, { from, to }) => {
+ipcMain.handle('file-move', async (_e, { from, to }) => {
   try { fs.renameSync(from, to); return { success: true }; } catch (e) { return { success: false, error: e.message }; }
 });
 
@@ -327,12 +348,12 @@ ipcMain.handle('ai-chat', async (_e, { messages, systemPrompt, model }) => {
   // Fetch real model list from Ollama first to get exact names (with :latest suffix)
   let availableModels = [];
   try {
-    const tagsRes = await fetch('http://127.0.0.1:11434/api/tags', { signal: AbortSignal.timeout(3000) });
+    const tagsRes = await fetchWithTimeout('http://127.0.0.1:11434/api/tags', {}, 3000);
     if (tagsRes.ok) {
       const d = await tagsRes.json();
       availableModels = (d.models || []).map(m => m.name);
     }
-  } catch {}
+  } catch { }
 
   // Build try-order: preferred model, then fuzzy-match from available, then fallbacks
   const preferred = model || 'qwen2.5';
@@ -360,85 +381,172 @@ ipcMain.handle('ai-chat', async (_e, { messages, systemPrompt, model }) => {
           messages: [{ role: 'system', content: systemPrompt }, ...messages],
           stream: false,
           options: { temperature: 0.7, num_ctx: 4096 }
-        }),
-        signal: AbortSignal.timeout(30000)
+        })
       });
       if (res.ok) {
         const d = await res.json();
         const text = d.message?.content || '';
         if (text) return { ok: true, text, provider: `ollama/${m}` };
       }
-    } catch {}
+    } catch { }
   }
 
   // Cloud fallbacks
   let cfg = {};
-  try { cfg = JSON.parse(fs.readFileSync(configPath(), 'utf8')); } catch {}
+  try { cfg = JSON.parse(fs.readFileSync(configPath(), 'utf8')); } catch { }
+
+  if (cfg.geminiKey) {
+    try {
+      const gapi = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${cfg.geminiKey}`;
+      const res = await fetchWithTimeout(gapi, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          system_instruction: { parts: [{ text: systemPrompt }] },
+          contents: messages.filter(m => !m.content.includes('No AI provider reachable')).map(m => ({
+            role: m.role === 'assistant' ? 'model' : 'user',
+            parts: [{ text: m.content }]
+          }))
+        })
+      });
+      if (res.ok) {
+        const d = await res.json();
+        const text = d.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        return { ok: true, text: text || '(Empty response from Gemini. Check terminal logs.)', provider: 'gemini' };
+      }
+    } catch { }
+  }
+
+  if (cfg.openRouterKey) {
+    try {
+      const res = await fetchWithTimeout('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${cfg.openRouterKey}`, 'HTTP-Referer': 'http://localhost', 'X-Title': 'Cardinal OS' },
+        body: JSON.stringify({ model: 'anthropic/claude-3.5-sonnet', messages: [{ role: 'system', content: systemPrompt }, ...messages.filter(m => !m.content.includes('No AI provider'))] })
+      });
+      if (res.ok) {
+        const d = await res.json();
+        const text = d.choices?.[0]?.message?.content || '';
+        return { ok: true, text: text || '(Empty response from OpenRouter)', provider: 'openrouter' };
+      }
+    } catch { }
+  }
 
   if (cfg.anthropicKey) {
     try {
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
+      const res = await fetchWithTimeout('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-api-key': cfg.anthropicKey, 'anthropic-version': '2023-06-01' },
-        body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 1024, system: systemPrompt, messages }),
-        signal: AbortSignal.timeout(25000)
+        body: JSON.stringify({ model: 'claude-3-5-haiku-20241022', max_tokens: 1024, system: systemPrompt, messages }),
       });
       if (res.ok) {
         const d = await res.json();
         return { ok: true, text: d.content?.[0]?.text || '', provider: 'anthropic' };
       }
-    } catch {}
+    } catch { }
   }
 
   if (cfg.openaiKey) {
     try {
-      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      const res = await fetchWithTimeout('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${cfg.openaiKey}` },
-        body: JSON.stringify({ model: 'gpt-4o-mini', messages: [{ role: 'system', content: systemPrompt }, ...messages] }),
-        signal: AbortSignal.timeout(25000)
+        body: JSON.stringify({ model: 'gpt-4o-mini', messages: [{ role: 'system', content: systemPrompt }, ...messages] })
       });
       if (res.ok) {
         const d = await res.json();
         return { ok: true, text: d.choices?.[0]?.message?.content || '', provider: 'openai' };
       }
-    } catch {}
+    } catch { }
   }
 
   return {
     ok: false,
     text: 'No AI provider reachable. Make sure Ollama is running (`ollama serve`). ' +
-          `Available models detected: ${availableModels.join(', ') || 'none'}.`,
+      `Available models detected: ${availableModels.join(', ') || 'none'}.`,
     provider: 'none'
   };
 });
 
 ipcMain.handle('get-ollama-models', async () => {
   try {
-    const res = await fetch('http://127.0.0.1:11434/api/tags', { signal: AbortSignal.timeout(3000) });
+    const res = await fetchWithTimeout('http://127.0.0.1:11434/api/tags', {}, 3000);
     if (res.ok) {
       const d = await res.json();
       return { ok: true, models: (d.models || []).map(m => m.name) };
     }
-  } catch {}
+  } catch { }
   return { ok: false, models: [] };
 });
 
 // ── IPC: history, config, profile, plugins ────────────────────────────────────
-ipcMain.handle('get-history',     ()                    => store.getConvs(40));
-ipcMain.handle('save-message',    (_e, {role, content}) => store.addConv(role, content));
-ipcMain.handle('clear-history',   ()                    => store.clearConvs());
-ipcMain.handle('add-reminder',    (_e, {text, due})     => store.addReminder(text, due));
-ipcMain.handle('get-reminders',   ()                    => store.getPendingReminders());
-ipcMain.handle('dismiss-reminder',(_e, id)              => store.doneReminder(id));
-ipcMain.handle('get-profile',     ()                    => store.getProfile());
-ipcMain.handle('update-profile',  (_e, {key, val})      => store.updateProfile(key, val));
+ipcMain.handle('get-history', () => store.getConvs(40));
+ipcMain.handle('save-message', (_e, { role, content }) => store.addConv(role, content));
+ipcMain.handle('clear-history', () => store.clearConvs());
+ipcMain.handle('add-reminder', (_e, { text, due }) => store.addReminder(text, due));
+ipcMain.handle('get-reminders', () => store.getPendingReminders());
+ipcMain.handle('dismiss-reminder', (_e, id) => store.doneReminder(id));
+ipcMain.handle('get-profile', () => store.getProfile());
+ipcMain.handle('update-profile', (_e, { key, val }) => store.updateProfile(key, val));
 
 const configPath = () => path.join(app.getPath('userData'), 'config.json');
-ipcMain.handle('get-config',  ()      => { try { return JSON.parse(fs.readFileSync(configPath(), 'utf8')); } catch { return {}; } });
+ipcMain.handle('get-config', () => { try { return JSON.parse(fs.readFileSync(configPath(), 'utf8')); } catch { return {}; } });
 ipcMain.handle('save-config', (_e, c) => fs.writeFileSync(configPath(), JSON.stringify(c, null, 2)));
 
 ipcMain.handle('get-network-details', async () => si.networkConnections().catch(() => []));
+
+ipcMain.handle('get-startup-progs', async () => {
+  try {
+    if (process.platform === 'win32') {
+      const { stdout } = await execAsync('powershell -NoProfile -Command "Get-CimInstance Win32_StartupCommand | Select-Object Name, Command | ConvertTo-Json"');
+      return JSON.parse(stdout || '[]');
+    }
+    return [];
+  } catch { return []; }
+});
+
+ipcMain.handle('disable-startup', async (_e, name) => {
+  if (process.platform !== 'win32') return { ok: false };
+  try {
+    await execAsync(`powershell -NoProfile -Command "Remove-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -Name '${name}' -ErrorAction SilentlyContinue"`);
+    return { ok: true };
+  } catch { return { ok: false }; }
+});
+
+ipcMain.handle('enable-startup', async (_e, { name, cmd }) => {
+  if (process.platform !== 'win32') return { ok: false };
+  try {
+    await execAsync(`powershell -NoProfile -Command "Set-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -Name '${name}' -Value '${cmd}'"`);
+    return { ok: true };
+  } catch { return { ok: false }; }
+});
+
+ipcMain.handle('get-scheduled-tasks', async () => {
+  try {
+    if (process.platform === 'win32') {
+      const { stdout } = await execAsync('schtasks /query /fo csv /v');
+      return stdout;
+    }
+    return 'Not supported on this platform';
+  } catch { return 'Error fetching tasks'; }
+});
+
+ipcMain.handle('get-open-ports', async () => {
+  try {
+    const ports = await si.networkConnections();
+    return ports.filter(c => c.state === 'LISTEN');
+  } catch { return []; }
+});
+
+ipcMain.handle('get-event-logs', async (_e, limit = 50) => {
+  try {
+    if (process.platform === 'win32') {
+      const { stdout } = await execAsync(`powershell -NoProfile -Command "Get-EventLog -LogName System -Newest ${limit} | ConvertTo-Json"`);
+      return JSON.parse(stdout || '[]');
+    }
+    return [];
+  } catch { return []; }
+});
 
 const pluginsDir = () => { const p = path.join(app.getPath('userData'), 'plugins'); if (!fs.existsSync(p)) fs.mkdirSync(p); return p; };
 ipcMain.handle('load-plugins', async () => {
@@ -450,6 +558,61 @@ ipcMain.handle('load-plugins', async () => {
     }).filter(Boolean);
 });
 
+ipcMain.handle('import-plugin', async () => {
+  try {
+    const { dialog } = require('electron');
+    const res = await dialog.showOpenDialog(mainWindow, {
+      title: 'Import Plugin Modules',
+      filters: [{ name: 'Javascript Modules', extensions: ['js'] }],
+      properties: ['openFile', 'multiSelections']
+    });
+    if (!res.canceled && res.filePaths.length > 0) {
+      for (const p of res.filePaths) {
+        const pName = path.basename(p);
+        fs.copyFileSync(p, path.join(pluginsDir(), pName));
+      }
+      return { ok: true };
+    }
+    return { ok: false };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+ipcMain.handle('transcribe-audio', async (_e, base64data) => {
+  let cfg = {};
+  try { cfg = JSON.parse(fs.readFileSync(configPath(), 'utf8')); } catch { }
+
+  if (!cfg.geminiKey) return { ok: false, error: 'Gemini API key is required inside settings to enable Microphone STT.' };
+
+  try {
+    const gapi = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${cfg.geminiKey}`;
+    const res = await fetchWithTimeout(gapi, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: "You are a raw speech-to-text transcriber. Output ONLY the exact transcription of the provided audio. Do not surround with quotes. Do not add commentary. Do not refuse." }] },
+        contents: [{
+          parts: [{
+            inline_data: {
+              mime_type: "audio/webm",
+              data: base64data
+            }
+          }]
+        }]
+      })
+    });
+    if (res.ok) {
+      const d = await res.json();
+      const text = d.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      return { ok: true, text };
+    }
+    return { ok: false, error: `Google API Error: ${res.status}` };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
 // ── Boot ──────────────────────────────────────────────────────────────────────
 app.whenReady().then(() => {
   store.init(path.join(app.getPath('userData'), 'cardinal.json'));
@@ -458,7 +621,7 @@ app.whenReady().then(() => {
   startThreatMonitor();
   startReminderCheck();
   powerMonitor.on('unlock-screen', () => mainWindow?.webContents.send('power-resume'));
-  powerMonitor.on('resume',        () => mainWindow?.webContents.send('power-resume'));
+  powerMonitor.on('resume', () => mainWindow?.webContents.send('power-resume'));
 });
 
 app.on('window-all-closed', () => {

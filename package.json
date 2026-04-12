@@ -2,6 +2,7 @@
   "name": "cardinal",
   "version": "1.0.0",
   "description": "Autonomous AI-driven OS Commander & Companion. Bridges system telemetry with AI action execution, security forensics, and automated web workflows.",
+  "author": "Softcurse Systems",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -11,6 +12,7 @@
   "dependencies": {
     "chart.js": "^4.5.1",
     "puppeteer": "^24.40.0",
+    "smart-buffer": "^4.2.0",
     "systeminformation": "^5.21.0"
   },
   "devDependencies": {
@@ -22,13 +24,16 @@
     "productName": "Cardinal",
     "copyright": "Softcurse Systems",
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "src/assets/cardinal_icon.png"
     },
     "mac": {
-      "target": "dmg"
+      "target": "dmg",
+      "icon": "src/assets/cardinal_icon.png"
     },
     "linux": {
-      "target": "AppImage"
+      "target": "AppImage",
+      "icon": "src/assets/cardinal_icon.png"
     }
   }
 }

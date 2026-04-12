@@ -1,19 +1,41 @@
 // ── Activity — monitor usage patterns, trigger proactive advice ───────────
 const Activity = (() => {
-  let sessionStart  = Date.now();
-  let lastActivity  = Date.now();
-  let breakSent     = false;
-  let resumeSent    = false;
-  let onAdvice      = null;
+  let sessionStart = Date.now();
+  let lastActivity = Date.now();
+  let breakSent = false;
+  let resumeSent = false;
+  let lateNightSent = false;
+  let onAdvice = null;
   let checkInterval = null;
 
-  const BREAK_THRESHOLD   = 90 * 60 * 1000;  // 90 min
-  const IDLE_THRESHOLD    =  5 * 60 * 1000;  // 5 min
-  const CHECK_INTERVAL    = 60 * 1000;        // every 60s
+  const BREAK_THRESHOLD = 90 * 60 * 1000;  // 90 min
+  const IDLE_THRESHOLD = 5 * 60 * 1000;  // 5 min
+  const CHECK_INTERVAL = 60 * 1000;        // every 60s
+
+  let windowTallies = {};
+
+  function trackWindow(winName) {
+    if (!winName || winName === 'Desktop' || winName === 'unknown') return;
+    const hour = new Date().getHours();
+    if (!windowTallies[hour]) windowTallies[hour] = {};
+    windowTallies[hour][winName] = (windowTallies[hour][winName] || 0) + 1;
+
+    // Save every minute (approx 30 ticks since called every 2s)
+    const total = Object.values(windowTallies[hour]).reduce((a, b) => a + b, 0);
+    if (total % 30 === 0) {
+      window.api.getProfile().then(prof => {
+        if (!prof.habits) prof.habits = {};
+        if (!prof.habits[hour]) prof.habits[hour] = {};
+        prof.habits[hour][winName] = (prof.habits[hour][winName] || 0) + 30;
+        window.api.updateProfile('habits', prof.habits).catch(() => { });
+        windowTallies[hour][winName] = 0; // reset local tally after save
+      }).catch(() => { });
+    }
+  }
 
   function recordActivity() {
     lastActivity = Date.now();
-    resumeSent   = false; // reset so next return triggers greeting
+    resumeSent = false; // reset so next return triggers greeting
   }
 
   function getSessionSeconds() {
@@ -27,10 +49,10 @@ const Activity = (() => {
   function startChecking(adviceCb) {
     onAdvice = adviceCb;
     document.addEventListener('mousemove', recordActivity, { passive: true });
-    document.addEventListener('keydown',   recordActivity, { passive: true });
+    document.addEventListener('keydown', recordActivity, { passive: true });
 
     checkInterval = setInterval(() => {
-      const idleMs    = Date.now() - lastActivity;
+      const idleMs = Date.now() - lastActivity;
       const sessionMs = Date.now() - sessionStart;
 
       // Returned from being away
@@ -49,8 +71,8 @@ const Activity = (() => {
 
       // Late night alert
       const hour = new Date().getHours();
-      if ((hour >= 23 || hour < 5) && !this.lateNightSent) {
-        this.lateNightSent = true;
+      if ((hour >= 23 || hour < 5) && !lateNightSent) {
+        lateNightSent = true;
         onAdvice?.({ type: 'late_night', message: "It's getting late. Remember to rest your eyes." });
       }
 
@@ -61,7 +83,7 @@ const Activity = (() => {
   function stop() {
     clearInterval(checkInterval);
     document.removeEventListener('mousemove', recordActivity);
-    document.removeEventListener('keydown',   recordActivity);
+    document.removeEventListener('keydown', recordActivity);
   }
 
   function onResume() {
@@ -71,5 +93,5 @@ const Activity = (() => {
     }
   }
 
-  return { startChecking, stop, onResume, getSessionSeconds, getIdleSeconds, recordActivity };
+  return { startChecking, stop, onResume, getSessionSeconds, getIdleSeconds, recordActivity, trackWindow };
 })();

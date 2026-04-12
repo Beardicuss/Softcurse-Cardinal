@@ -1,36 +1,37 @@
 // ── AI — LLM conversation engine (Ollama: qwen2.5 / llama3.1 priority) ────────
 const AI = (() => {
-  let history      = [];
-  let sysState     = {};
-  let userName     = '';
-  let thinking     = false;
+  let history = [];
+  let sysState = {};
+  let userName = '';
+  let thinking = false;
   let preferredModel = 'qwen2.5';
+  let pluginDescriptions = [];
 
   const ACTIONS = {
-    kill_process:    async (p) => window.api.killProcess(p.pid),
-    run_command:     async (p) => window.api.runCommand(p.cmd),
-    run_defender:    async ()  => window.api.runDefender(),
-    run_sfc:         async ()  => window.api.runSfc(),
-    run_defrag:      async ()  => window.api.runDefrag(),
-    clear_cache:     async ()  => window.api.clearCache(),
-    run_threat_scan: async ()  => window.api.runThreatScan(),
-    set_reminder:    async (p) => {
+    kill_process: async (p) => window.api.killProcess(p.pid),
+    run_command: async (p) => window.api.runCommand(p.cmd),
+    run_defender: async () => window.api.runDefender(),
+    run_sfc: async () => window.api.runSfc(),
+    run_defrag: async () => window.api.runDefrag(),
+    clear_cache: async () => window.api.clearCache(),
+    run_threat_scan: async () => window.api.runThreatScan(),
+    set_reminder: async (p) => {
       const due = Date.now() + (p.minutes || 30) * 60000;
       return window.api.addReminder({ text: p.text || p.message, due });
     },
-    open_url:        async (p) => window.api.openExternal(p.url),
-    clear_history:   async ()  => window.api.clearHistory(),
-    browser_read:    async (p) => window.api.browserAuto({ url: p.url, action: 'read' }),
-    browser_fill:    async (p) => window.api.browserAuto({ url: p.url, action: 'fill', data: p.data }),
-    elevate_admin:   async ()  => window.api.elevateAdmin(),
-    update_profile:  async (p) => window.api.updateProfile(p.key, p.val),
+    open_url: async (p) => window.api.openExternal(p.url),
+    clear_history: async () => window.api.clearHistory(),
+    browser_read: async (p) => window.api.browserAuto({ url: p.url, action: 'read' }),
+    browser_fill: async (p) => window.api.browserAuto({ url: p.url, action: 'fill', data: p.data }),
+    elevate_admin: async () => window.api.elevateAdmin(),
+    update_profile: async (p) => window.api.updateProfile(p.key, p.val),
   };
 
   function buildSystemPrompt() {
-    const now      = new Date();
+    const now = new Date();
     const langName = { en: 'English', ru: 'Russian', ka: 'Georgian' }[I18n.getLocale()] || 'English';
-    const top      = sysState.processes?.[0];
-    const profile  = sysState.profile || {};
+    const top = sysState.processes?.[0];
+    const profile = sysState.profile || {};
 
     return `You are Cardinal, an OS commander and companion built by Softcurse Systems.
 You are direct, composed, observant, and occasionally dry-witted.
@@ -57,6 +58,7 @@ Available actions:
 - browser_fill       params: { url: string, data: object } — fill form fields (key=selector, val=text)
 - elevate_admin      (no params) — request admin rights on Windows
 - update_profile     params: { key: string, val: any } — update user profile/habits
+${pluginDescriptions.join('\n')}
 
 Only include the JSON block when an action is actually needed. Never fabricate it.
 
@@ -97,15 +99,15 @@ Respond in ${langName}.`;
     history.push({ role: 'user', content: userMessage });
     try {
       const result = await window.api.aiChat({
-        messages:     history.map(h => ({ role: h.role, content: h.content })),
+        messages: history.map(h => ({ role: h.role, content: h.content })),
         systemPrompt: buildSystemPrompt(),
-        model:        preferredModel
+        model: preferredModel
       });
-      const rawText   = result.text || '';
+      const rawText = result.text || '';
       const cleanResp = cleanText(rawText);
-      const action    = parseAction(rawText);
+      const action = parseAction(rawText);
       history.push({ role: 'assistant', content: cleanResp });
-      await window.api.saveMessage({ role: 'user',      content: userMessage });
+      await window.api.saveMessage({ role: 'user', content: userMessage });
       await window.api.saveMessage({ role: 'assistant', content: cleanResp });
       let actionResult = null;
       if (action && ACTIONS[action.action]) {
@@ -113,7 +115,7 @@ Respond in ${langName}.`;
           actionResult = await ACTIONS[action.action](action.params || {});
           if (action.action === 'update_profile') {
             const newProfile = await window.api.getProfile();
-            this.updateState({ profile: newProfile });
+            updateState({ profile: newProfile });
           }
         } catch (e) {
           console.warn('Action failed:', action.action, e.message);
@@ -132,14 +134,19 @@ Respond in ${langName}.`;
     const h = await window.api.getHistory().catch(() => []);
     history = h.map(r => ({ role: r.role, content: r.content }));
     const profile = await window.api.getProfile().catch(() => ({}));
-    this.updateState({ profile });
+    updateState({ profile });
   }
 
-  function updateState(state)  { sysState = { ...sysState, ...state }; }
-  function setUserName(name)   { userName = name; }
-  function setModel(m)         { preferredModel = m; }
-  function getModel()          { return preferredModel; }
-  function isThinking()        { return thinking; }
+  function updateState(state) { sysState = { ...sysState, ...state }; }
+  function setUserName(name) { userName = name; }
+  function setModel(m) { preferredModel = m; }
+  function getModel() { return preferredModel; }
+  function isThinking() { return thinking; }
 
-  return { send, updateState, setUserName, setModel, getModel, loadHistory, isThinking };
+  function registerAction(name, description, fn) {
+    ACTIONS[name] = fn;
+    pluginDescriptions.push(`- ${name}       ${description}`);
+  }
+
+  return { send, updateState, setUserName, setModel, getModel, loadHistory, isThinking, registerAction };
 })();

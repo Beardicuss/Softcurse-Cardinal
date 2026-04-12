@@ -1,295 +1,436 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-  <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Cardinal</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com"/>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Barlow+Condensed:wght@400;600;700&family=Inter:wght@300;400;500&display=swap" rel="stylesheet"/>
-  <link rel="stylesheet" href="css/style.css"/>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link
+    href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Barlow+Condensed:wght@400;600;700&family=Inter:wght@300;400;500&display=swap"
+    rel="stylesheet" />
+  <link rel="stylesheet" href="css/style.css" />
   <style>
-    .hidden { display: none !important; }
-    .tab-btn.active { color: var(--red) !important; border-bottom: 1px solid var(--red) !important; }
-    .file-item, .net-item { padding: 4px 8px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.02); }
-    .file-item:hover, .net-item:hover { background: rgba(180,40,30,0.05); }
+    .hidden {
+      display: none !important;
+    }
+
+    .tab-btn.active {
+      color: var(--red) !important;
+      border-bottom: 1px solid var(--red) !important;
+    }
+
+    .file-item,
+    .net-item {
+      padding: 4px 8px;
+      cursor: pointer;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+    }
+
+    .file-item:hover,
+    .net-item:hover {
+      background: rgba(180, 40, 30, 0.05);
+    }
   </style>
 </head>
+
 <body>
 
-<!-- TOP BAR -->
-<header id="topbar">
-  <div class="drag-region"></div>
-  <div class="tb-left">
-    <img src="assets/cardinal_icon.png" alt="Icon" style="width:20px;height:20px;margin-right:8px;vertical-align:middle;filter:drop-shadow(0 0 5px var(--red))"/><span class="logo-name">Cardinal</span>
-    <span class="logo-sub">Softcurse Systems</span>
-  </div>
-  <div class="tb-center">
-    <span id="clock" class="clock">00:00:00</span>
-  </div>
-  <div class="tb-right">
-    <div class="lang-switcher">
-      <button class="lang-btn active" data-lang="en">EN</button>
-      <span class="lang-sep">|</span>
-      <button class="lang-btn" data-lang="ru">RU</button>
-      <span class="lang-sep">|</span>
-      <button class="lang-btn" data-lang="ka">KA</button>
+  <!-- TOP BAR -->
+  <header id="topbar">
+    <div class="drag-region"></div>
+    <div class="tb-left">
+      <img src="assets/cardinal_icon.png" alt="Icon"
+        style="width:20px;height:20px;margin-right:8px;vertical-align:middle;filter:drop-shadow(0 0 5px var(--red))" /><span
+        class="logo-name">Cardinal</span>
+      <span class="logo-sub">Softcurse Systems</span>
     </div>
-    <div class="mic-indicator" id="micIndicator">
-      <span class="mic-dot"></span>
-      <span class="mic-label" id="micLabel">MIC OFF</span>
+    <div class="tb-center">
+      <span id="clock" class="clock">00:00:00</span>
     </div>
-    <div class="win-controls">
-      <button class="wc-btn" id="btnMin">─</button>
-      <button class="wc-btn" id="btnMax">□</button>
-      <button class="wc-btn wc-close" id="btnClose">✕</button>
-    </div>
-  </div>
-</header>
-
-<!-- MAIN -->
-<main id="layout">
-
-  <!-- LEFT: Process & Network Intelligence -->
-  <aside id="panel-left" class="panel panel-left">
-    <div class="panel-tabs" style="display:flex;border-bottom:1px solid var(--border)">
-      <button class="tab-btn active" data-tab="proc" style="flex:1;background:none;border:none;color:var(--text-lo);font-family:var(--font-mono);font-size:9px;padding:8px;cursor:pointer;letter-spacing:1px">PROCESS</button>
-      <button class="tab-btn" data-tab="net" style="flex:1;background:none;border:none;color:var(--text-lo);font-family:var(--font-mono);font-size:9px;padding:8px;cursor:pointer;letter-spacing:1px">NETWORK</button>
-    </div>
-    
-    <div id="proc-tab-content" class="tab-content">
-      <div id="proc-list" class="proc-list" style="height:400px;overflow-y:auto">
-        <div class="proc-placeholder">Waiting for data...</div>
+    <div class="tb-right">
+      <div class="lang-switcher">
+        <button class="lang-btn active" data-lang="en">EN</button>
+        <span class="lang-sep">|</span>
+        <button class="lang-btn" data-lang="ru">RU</button>
+        <span class="lang-sep">|</span>
+        <button class="lang-btn" data-lang="ka">KA</button>
+      </div>
+      <div class="mic-indicator" id="micIndicator">
+        <span class="mic-dot"></span>
+        <span class="mic-label" id="micLabel">MIC OFF</span>
+      </div>
+      <div class="win-controls">
+        <button class="wc-btn" id="btnMin">─</button>
+        <button class="wc-btn" id="btnMax">□</button>
+        <button class="wc-btn wc-close" id="btnClose">✕</button>
       </div>
     </div>
+  </header>
 
-    <div id="net-tab-content" class="tab-content hidden">
-      <div id="net-monitor" style="padding:12px;font-family:var(--font-mono);font-size:10px">
-        <div class="section-label">Active Connections</div>
-        <div id="net-conn-list" style="height:350px;overflow-y:auto;color:var(--text-mid)">
-          Scanning network...
-        </div>
-      </div>
-    </div>
+  <!-- MAIN -->
+  <main id="layout">
 
-    <div class="net-section">
-      <div class="section-label" data-i18n="network_io">Network I/O</div>
-      <div class="net-row"><span class="net-name" data-i18n="upload">Upload</span><span class="net-val up" id="netUp">—</span></div>
-      <div class="net-row"><span class="net-name" data-i18n="download">Download</span><span class="net-val dn" id="netDown">—</span></div>
-      <div class="net-row"><span class="net-name" data-i18n="connections">Processes</span><span class="net-val" id="netConns" style="color:#b8b0a8">—</span></div>
-      <div class="net-row"><span class="net-name" data-i18n="temp">CPU Temp</span><span class="net-val" id="cpuTemp" style="color:#b8b0a8">—</span></div>
-    </div>
-  </aside>
-
-  <div class="resizer" id="resizer-left"></div>
-
-  <!-- CENTER: Cardinal Interface -->
-  <section id="panel-center" class="panel panel-center">
-
-    <!-- HOLOGRAM -->
-    <div id="hologram">
-      <div class="holo-grid"></div>
-      <div class="scan-beam"></div>
-
-      <div class="holo-data left">
-        <div>SYS/<span class="hd-val" id="hd-sys">ONLINE</span></div>
-        <div>CORE/<span class="hd-val" id="hd-temp">—°C</span></div>
-        <div>NET/<span class="hd-val" id="hd-net">SECURED</span></div>
-        <div>WIN/<span class="hd-val" id="hd-win" style="font-size:7px">—</span></div>
+    <!-- LEFT: Process & Network Intelligence -->
+    <aside id="panel-left" class="panel panel-left">
+      <div class="panel-tabs" style="display:flex;border-bottom:1px solid var(--border)">
+        <button class="tab-btn active" data-tab="proc"
+          style="flex:1;background:none;border:none;color:var(--text-lo);font-family:var(--font-mono);font-size:9px;padding:8px;cursor:pointer;letter-spacing:1px">PROCESS</button>
+        <button class="tab-btn" data-tab="net"
+          style="flex:1;background:none;border:none;color:var(--text-lo);font-family:var(--font-mono);font-size:9px;padding:8px;cursor:pointer;letter-spacing:1px">NETWORK</button>
+        <button class="tab-btn" data-tab="browser"
+          style="flex:1;background:none;border:none;color:var(--text-lo);font-family:var(--font-mono);font-size:9px;padding:8px;cursor:pointer;letter-spacing:1px">BROWSER</button>
       </div>
 
-      <div class="holo-data right">
-        <div>UP/<span class="hd-val" id="hd-uptime">00:00</span></div>
-        <div>PROC/<span class="hd-val" id="hd-proc">—</span></div>
-        <div>CPU/<span class="hd-val" id="hd-cpu">—%</span></div>
-        <div>RAM/<span class="hd-val" id="hd-ram">—%</span></div>
-      </div>
-
-      <div class="orb-scene">
-        <div class="orb-ring r1"></div>
-        <div class="orb-ring r2"></div>
-        <div class="orb-ring r3"></div>
-        <div class="orb-ring r4"></div>
-        <div class="orb-ring r5"></div>
-        <div class="dot-orbit d1"></div>
-        <div class="dot-orbit d2"></div>
-        <div class="eye-core">
-          <canvas id="eyeCanvas" width="64" height="44"></canvas>
+      <div id="proc-tab-content" class="tab-content">
+        <div id="proc-list" class="proc-list" style="height:400px;overflow-y:auto">
+          <div class="proc-placeholder">Waiting for data...</div>
         </div>
       </div>
 
-      <div class="holo-bottom-label"><img src="assets/cardinal_logo_full.png" alt="Logo" style="height:12px;opacity:0.6;margin-bottom:4px"/><br/>— CARDINAL ONLINE —</div>
-      <div class="holo-vignette"></div>
-      <div class="corner tl"></div><div class="corner tr"></div>
-      <div class="corner bl"></div><div class="corner br"></div>
-    </div>
-
-    <!-- CHAT LOG -->
-    <div id="chat-log" class="chat-log"></div>
-
-    <!-- SPARKLINE CHART -->
-    <div id="sparkline-container" style="height:60px;margin:0 14px 10px;background:rgba(180,40,30,0.03);border:1px solid var(--border);border-radius:var(--radius);position:relative;overflow:hidden">
-      <canvas id="sparklineChart" style="width:100%;height:100%"></canvas>
-      <div style="position:absolute;top:4px;left:8px;font-family:var(--font-mono);font-size:8px;color:var(--text-lo);letter-spacing:1px;pointer-events:none">60S VITALS HISTORY</div>
-    </div>
-
-    <!-- VITALS -->
-    <div class="vitals-strip">
-      <div class="vital-cell">
-        <div class="vital-val" id="vCpu">0%</div>
-        <div class="vital-lbl">CPU</div>
-        <div class="vital-bar"><div class="vital-fill" id="vCpuBar"></div></div>
-      </div>
-      <div class="vital-cell">
-        <div class="vital-val" id="vRam">0%</div>
-        <div class="vital-lbl">RAM</div>
-        <div class="vital-bar"><div class="vital-fill" id="vRamBar"></div></div>
-      </div>
-      <div class="vital-cell">
-        <div class="vital-val" id="vDisk">0%</div>
-        <div class="vital-lbl" data-i18n="disk">DISK</div>
-        <div class="vital-bar"><div class="vital-fill" id="vDiskBar" style="background:#d4712a"></div></div>
-      </div>
-      <div class="vital-cell">
-        <div class="vital-val" id="vNet">0</div>
-        <div class="vital-lbl">MB/S ↓</div>
-        <div class="vital-bar"><div class="vital-fill" id="vNetBar" style="background:#5aaa70"></div></div>
-      </div>
-    </div>
-
-    <!-- INPUT -->
-    <div class="input-row">
-      <button class="mic-btn" id="micBtn" title="Toggle voice">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <rect x="9" y="2" width="6" height="12" rx="3"/>
-          <path d="M19 10a7 7 0 01-14 0"/>
-          <line x1="12" y1="19" x2="12" y2="23"/>
-          <line x1="8" y1="23" x2="16" y2="23"/>
-        </svg>
-      </button>
-      <input id="chatInput" class="chat-input" type="text" placeholder="Issue a command or ask anything..." autocomplete="off"/>
-      <button id="sendBtn" class="send-btn" data-i18n="send">Send</button>
-    </div>
-  </section>
-
-  <div class="resizer" id="resizer-right"></div>
-
-  <!-- RIGHT: Health & Files -->
-  <aside id="panel-right" class="panel panel-right">
-    <div class="panel-tabs" style="display:flex;border-bottom:1px solid var(--border)">
-      <button class="tab-btn active" data-tab="health" style="flex:1;background:none;border:none;color:var(--text-lo);font-family:var(--font-mono);font-size:9px;padding:8px;cursor:pointer;letter-spacing:1px">HEALTH</button>
-      <button class="tab-btn" data-tab="files" style="flex:1;background:none;border:none;color:var(--text-lo);font-family:var(--font-mono);font-size:9px;padding:8px;cursor:pointer;letter-spacing:1px">FILES</button>
-    </div>
-
-    <div id="health-tab-content" class="tab-content">
-      <div class="panel-header" data-i18n="system_health" style="border-top:none">System Health</div>
-      <div class="metric-block">
-        <div class="metric-val" id="mIntegrity">98<span class="metric-unit">%</span></div>
-        <div class="metric-sub" data-i18n="integrity_score">Integrity Score</div>
-        <div class="vital-bar" style="margin-top:8px">
-          <div class="vital-fill" id="integrityBar" style="width:98%;background:#5aaa70"></div>
+      <div id="net-tab-content" class="tab-content hidden">
+        <div id="net-monitor" style="padding:12px;font-family:var(--font-mono);font-size:10px">
+          <div class="section-label">Active Connections</div>
+          <div id="net-conn-list" style="height:350px;overflow-y:auto;color:var(--text-mid)">
+            Scanning network...
+          </div>
         </div>
       </div>
-      <div class="metric-block">
-        <div class="metric-val" id="mSpaceFreed">0<span class="metric-unit"> GB</span></div>
-        <div class="metric-sub" data-i18n="space_freed">Space Freed</div>
+
+      <div id="browser-tab-content" class="tab-content hidden"
+        style="padding:12px;font-family:var(--font-mono);font-size:10px;height:400px;display:flex;flex-direction:column">
+        <div class="section-label">Web Automation</div>
+        <input type="text" id="browserUrl" class="chat-input" style="width:100%;margin-bottom:6px;font-size:10px"
+          placeholder="https://..." />
+        <button class="qa-btn" id="browserReadBtn">Read Page Context</button>
+        <div class="section-label" style="margin-top:10px">Interactive</div>
+        <textarea id="browserData" class="chat-input"
+          style="width:100%;height:60px;margin-bottom:6px;font-size:10px;resize:none"
+          placeholder='{"#search":"query"}'></textarea>
+        <button class="qa-btn" id="browserFillBtn">Fill Form & Submit</button>
+        <div id="browserStatus"
+          style="color:var(--text-ghost);margin-top:8px;word-wrap:break-word;flex:1;overflow-y:auto">Status: Idle</div>
       </div>
-      <div class="metric-block">
-        <div class="metric-val" id="mThreats">0</div>
-        <div class="metric-sub" data-i18n="threats_cleared">Threats Found</div>
+
+      <div class="net-section">
+        <div class="section-label" data-i18n="network_io">Network I/O</div>
+        <div class="net-row"><span class="net-name" data-i18n="upload">Upload</span><span class="net-val up"
+            id="netUp">—</span></div>
+        <div class="net-row"><span class="net-name" data-i18n="download">Download</span><span class="net-val dn"
+            id="netDown">—</span></div>
+        <div class="net-row"><span class="net-name" data-i18n="connections">Processes</span><span class="net-val"
+            id="netConns" style="color:#b8b0a8">—</span></div>
+        <div class="net-row"><span class="net-name" data-i18n="temp">CPU Temp</span><span class="net-val" id="cpuTemp"
+            style="color:#b8b0a8">—</span></div>
       </div>
-      <div class="metric-block" style="border-bottom:none">
-        <div class="metric-val" id="mUptime" style="font-size:20px">00:00:00</div>
-        <div class="metric-sub" data-i18n="session_uptime">Session Uptime</div>
+    </aside>
+
+    <div class="resizer" id="resizer-left"></div>
+
+    <!-- CENTER: Cardinal Interface -->
+    <section id="panel-center" class="panel panel-center">
+
+      <!-- HOLOGRAM -->
+      <div id="hologram">
+        <div class="holo-grid"></div>
+        <div class="scan-beam"></div>
+
+        <div class="holo-data left">
+          <div>SYS/<span class="hd-val" id="hd-sys">ONLINE</span></div>
+          <div>CORE/<span class="hd-val" id="hd-temp">—°C</span></div>
+          <div>NET/<span class="hd-val" id="hd-net">SECURED</span></div>
+          <div>WIN/<span class="hd-val" id="hd-win" style="font-size:7px">—</span></div>
+        </div>
+
+        <div class="holo-data right">
+          <div>UP/<span class="hd-val" id="hd-uptime">00:00</span></div>
+          <div>PROC/<span class="hd-val" id="hd-proc">—</span></div>
+          <div>CPU/<span class="hd-val" id="hd-cpu">—%</span></div>
+          <div>RAM/<span class="hd-val" id="hd-ram">—%</span></div>
+        </div>
+
+        <div class="orb-scene">
+          <div class="orb-ring r1"></div>
+          <div class="orb-ring r2"></div>
+          <div class="orb-ring r3"></div>
+          <div class="orb-ring r4"></div>
+          <div class="orb-ring r5"></div>
+          <div class="dot-orbit d1"></div>
+          <div class="dot-orbit d2"></div>
+          <div class="eye-core">
+            <canvas id="eyeCanvas" width="64" height="44"></canvas>
+          </div>
+        </div>
+
+        <div class="holo-bottom-label"><img src="assets/cardinal_logo_full.png" alt="Logo"
+            style="height:12px;opacity:0.6;margin-bottom:4px" /><br />— CARDINAL ONLINE —</div>
+        <div class="holo-vignette"></div>
+        <div class="corner tl"></div>
+        <div class="corner tr"></div>
+        <div class="corner bl"></div>
+        <div class="corner br"></div>
       </div>
-      <div class="threat-matrix">
-        <div class="section-label" data-i18n="threat_matrix">Threat Matrix</div>
-        <div class="threat-row"><span class="t-lbl">Malware</span><div class="t-bar"><div class="t-fill" id="tbarMalware" style="width:5%;background:#c8392b"></div></div></div>
-        <div class="threat-row"><span class="t-lbl">Adware</span><div class="t-bar"><div class="t-fill" id="tbarAdware" style="width:8%;background:#d4712a"></div></div></div>
-        <div class="threat-row"><span class="t-lbl">Network</span><div class="t-bar"><div class="t-fill" id="tbarNetwork" style="width:12%;background:#d4712a"></div></div></div>
-        <div class="threat-row"><span class="t-lbl">Integrity</span><div class="t-bar"><div class="t-fill" id="tbarIntegrity" style="width:3%;background:#5aaa70"></div></div></div>
+
+      <!-- CHAT LOG -->
+      <div id="chat-log" class="chat-log"></div>
+
+      <!-- SPARKLINE CHART -->
+      <div id="sparkline-container"
+        style="height:60px;margin:0 14px 10px;background:rgba(180,40,30,0.03);border:1px solid var(--border);border-radius:var(--radius);position:relative;overflow:hidden">
+        <canvas id="sparklineChart" style="width:100%;height:100%"></canvas>
+        <div
+          style="position:absolute;top:4px;left:8px;font-family:var(--font-mono);font-size:8px;color:var(--text-lo);letter-spacing:1px;pointer-events:none">
+          60S VITALS HISTORY</div>
       </div>
-      <div class="quick-actions">
-        <div class="section-label" data-i18n="quick_actions">Quick Actions</div>
-        <button class="qa-btn" data-cmd="defender" data-i18n="run_defender">Run Defender</button>
-        <button class="qa-btn" data-cmd="sfc"      data-i18n="run_sfc">SFC Scan</button>
-        <button class="qa-btn" data-cmd="defrag"   data-i18n="run_defrag">Defrag C:</button>
-        <button class="qa-btn" data-cmd="cache"    data-i18n="clear_cache">Clear Cache</button>
+
+      <!-- VITALS -->
+      <div class="vitals-strip">
+        <div class="vital-cell">
+          <div class="vital-val" id="vCpu">0%</div>
+          <div class="vital-lbl">CPU</div>
+          <div class="vital-bar">
+            <div class="vital-fill" id="vCpuBar"></div>
+          </div>
+        </div>
+        <div class="vital-cell">
+          <div class="vital-val" id="vRam">0%</div>
+          <div class="vital-lbl">RAM</div>
+          <div class="vital-bar">
+            <div class="vital-fill" id="vRamBar"></div>
+          </div>
+        </div>
+        <div class="vital-cell">
+          <div class="vital-val" id="vDisk">0%</div>
+          <div class="vital-lbl" data-i18n="disk">DISK</div>
+          <div class="vital-bar">
+            <div class="vital-fill" id="vDiskBar" style="background:#d4712a"></div>
+          </div>
+        </div>
+        <div class="vital-cell">
+          <div class="vital-val" id="vNet">0</div>
+          <div class="vital-lbl">MB/S ↓</div>
+          <div class="vital-bar">
+            <div class="vital-fill" id="vNetBar" style="background:#5aaa70"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- INPUT -->
+      <div class="input-row">
+        <button class="mic-btn" id="micBtn" title="Toggle voice">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="9" y="2" width="6" height="12" rx="3" />
+            <path d="M19 10a7 7 0 01-14 0" />
+            <line x1="12" y1="19" x2="12" y2="23" />
+            <line x1="8" y1="23" x2="16" y2="23" />
+          </svg>
+        </button>
+        <input id="chatInput" class="chat-input" type="text" placeholder="Issue a command or ask anything..."
+          autocomplete="off" />
+        <button id="sendBtn" class="send-btn" data-i18n="send">Send</button>
+      </div>
+    </section>
+
+    <div class="resizer" id="resizer-right"></div>
+
+    <!-- RIGHT: Health & Files -->
+    <aside id="panel-right" class="panel panel-right">
+      <div class="panel-tabs" style="display:flex;border-bottom:1px solid var(--border)">
+        <button class="tab-btn active" data-tab="health"
+          style="flex:1;background:none;border:none;color:var(--text-lo);font-family:var(--font-mono);font-size:9px;padding:8px;cursor:pointer;letter-spacing:1px">HEALTH</button>
+        <button class="tab-btn" data-tab="startup"
+          style="flex:1;background:none;border:none;color:var(--text-lo);font-family:var(--font-mono);font-size:9px;padding:8px;cursor:pointer;letter-spacing:1px">STARTUP</button>
+        <button class="tab-btn" data-tab="files"
+          style="flex:1;background:none;border:none;color:var(--text-lo);font-family:var(--font-mono);font-size:9px;padding:8px;cursor:pointer;letter-spacing:1px">FILES</button>
+      </div>
+
+      <div id="health-tab-content" class="tab-content" style="flex:1; overflow-y:auto">
+        <div class="panel-header" data-i18n="system_health" style="border-top:none">System Health</div>
+        <div class="metric-block">
+          <div class="metric-val" id="mIntegrity">98<span class="metric-unit">%</span></div>
+          <div class="metric-sub" data-i18n="integrity_score">Integrity Score</div>
+          <div class="vital-bar" style="margin-top:8px">
+            <div class="vital-fill" id="integrityBar" style="width:98%;background:#5aaa70"></div>
+          </div>
+        </div>
+        <div class="metric-block">
+          <div class="metric-val" id="mSpaceFreed">0<span class="metric-unit"> GB</span></div>
+          <div class="metric-sub" data-i18n="space_freed">Space Freed</div>
+        </div>
+        <div class="metric-block">
+          <div class="metric-val" id="mThreats">0</div>
+          <div class="metric-sub" data-i18n="threats_cleared">Threats Found</div>
+        </div>
+        <div class="metric-block" style="border-bottom:none">
+          <div class="metric-val" id="mUptime" style="font-size:20px">00:00:00</div>
+          <div class="metric-sub" data-i18n="session_uptime">Session Uptime</div>
+        </div>
+        <div class="threat-matrix">
+          <div class="section-label" data-i18n="threat_matrix">Threat Matrix</div>
+          <div class="threat-row"><span class="t-lbl">Malware</span>
+            <div class="t-bar">
+              <div class="t-fill" id="tbarMalware" style="width:5%;background:#c8392b"></div>
+            </div>
+          </div>
+          <div class="threat-row"><span class="t-lbl">Adware</span>
+            <div class="t-bar">
+              <div class="t-fill" id="tbarAdware" style="width:8%;background:#d4712a"></div>
+            </div>
+          </div>
+          <div class="threat-row"><span class="t-lbl">Network</span>
+            <div class="t-bar">
+              <div class="t-fill" id="tbarNetwork" style="width:12%;background:#d4712a"></div>
+            </div>
+          </div>
+          <div class="threat-row"><span class="t-lbl">Integrity</span>
+            <div class="t-bar">
+              <div class="t-fill" id="tbarIntegrity" style="width:3%;background:#5aaa70"></div>
+            </div>
+          </div>
+        </div>
+        <div class="quick-actions">
+          <div class="section-label" data-i18n="quick_actions">Quick Actions</div>
+          <button class="qa-btn" data-cmd="defender" data-i18n="run_defender">Run Defender</button>
+          <button class="qa-btn" data-cmd="sfc" data-i18n="run_sfc">SFC Scan</button>
+          <button class="qa-btn" data-cmd="defrag" data-i18n="run_defrag">Defrag C:</button>
+          <button class="qa-btn" data-cmd="cache" data-i18n="clear_cache">Clear Cache</button>
+        </div>
+      </div>
+
+      <div id="startup-tab-content" class="tab-content hidden"
+        style="flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+        <div style="padding:10px;display:flex;flex-direction:column;height:100%;gap:6px">
+          <div class="section-label" style="flex-shrink:0">Startup Manager</div>
+          <div id="startup-list"
+            style="flex:1;overflow-y:auto;font-family:var(--font-mono);font-size:11px;color:var(--text-mid);padding-bottom:10px;min-height:0">
+            Loading system entries...</div>
+        </div>
+      </div>
+
+      <div id="files-tab-content" class="tab-content hidden"
+        style="flex:1; display:flex; flex-direction:column; min-height:0; overflow:hidden">
+        <div id="file-manager" style="padding:10px;display:flex;flex-direction:column;height:100%;gap:6px">
+          <div style="display:flex;gap:4px;align-items:center">
+            <button id="file-back-btn" class="wc-btn" style="width:28px;font-size:13px;flex-shrink:0"
+              title="Go back">←</button>
+            <button id="file-home-btn" class="wc-btn" style="width:28px;font-size:11px;flex-shrink:0"
+              title="Home">⌂</button>
+            <input id="file-path-input" type="text"
+              style="flex:1;background:var(--surface-hi);border:1px solid var(--border);color:var(--text-hi);font-family:var(--font-mono);font-size:12px;padding:5px 8px;border-radius:2px"
+              placeholder="C:\" />
+            <button id="file-go-btn" class="wc-btn" style="width:36px;font-size:11px;flex-shrink:0">GO</button>
+          </div>
+          <div id="file-breadcrumb"
+            style="font-family:var(--font-mono);font-size:11px;color:var(--text-lo);padding:2px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+          </div>
+          <div id="file-list"
+            style="flex:1;overflow-y:auto;font-family:var(--font-mono);font-size:12px;color:var(--text-mid);min-height:0">
+            Loading files...
+          </div>
+          <div id="file-status"
+            style="font-family:var(--font-mono);font-size:11px;color:var(--text-ghost);padding:2px 0;border-top:1px solid var(--border);flex-shrink:0">
+          </div>
+        </div>
+      </div>
+    </aside>
+
+  </main>
+
+  <!-- TERMINAL -->
+  <footer id="terminal">
+    <div class="term-header">
+      <span class="section-label">Terminal Log</span>
+      <button class="term-clear-btn" id="termClear">CLR</button>
+    </div>
+    <div id="term-log" class="term-log"></div>
+  </footer>
+
+  <!-- SETTINGS OVERLAY -->
+  <div id="settings-overlay" class="overlay hidden">
+    <div class="overlay-panel">
+      <div class="overlay-header">
+        <span class="section-label">Settings</span>
+        <button class="overlay-close" id="settingsClose">✕</button>
+      </div>
+      <div class="settings-body">
+        <div class="setting-group">
+          <label class="setting-label">AI Model (Ollama)</label>
+          <select id="cfgModel" class="setting-input" style="cursor:pointer">
+            <option value="qwen2.5">qwen2.5</option>
+            <option value="llama3.1">llama3.1</option>
+            <option value="llama3">llama3</option>
+            <option value="mistral">mistral</option>
+          </select>
+        </div>
+        <div class="setting-group">
+          <label class="setting-label" data-i18n="anthropic_key">Anthropic API Key (fallback)</label>
+          <input type="password" id="cfgAnthropic" class="setting-input" placeholder="sk-ant-..." />
+        </div>
+        <div class="setting-group">
+          <label class="setting-label" data-i18n="openai_key">OpenAI API Key (fallback)</label>
+          <input type="password" id="cfgOpenai" class="setting-input" placeholder="sk-..." />
+        </div>
+        <div class="setting-group">
+          <label class="setting-label">Gemini API Key (fallback)</label>
+          <input type="password" id="cfgGemini" class="setting-input" placeholder="AIza..." />
+        </div>
+        <div class="setting-group">
+          <label class="setting-label">OpenRouter API Key (fallback)</label>
+          <input type="password" id="cfgOpenRouter" class="setting-input" placeholder="sk-or-v1-..." />
+        </div>
+        <div class="setting-group">
+          <label class="setting-label" data-i18n="user_name">Your Name</label>
+          <input type="text" id="cfgName" class="setting-input" placeholder="Dante" />
+        </div>
+
+        <div class="setting-group">
+          <label class="setting-label">Voice Characteristics</label>
+          <select id="cfgVoice" class="setting-input" style="cursor:pointer;margin-bottom:6px">
+            <option value="default">System Default</option>
+          </select>
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+            <span style="font-size:10px;color:var(--text-lo);width:30px">Pitch</span>
+            <input type="range" id="cfgPitch" min="0" max="2" step="0.1" value="0.9" style="flex:1" />
+          </div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-size:10px;color:var(--text-lo);width:30px">Rate</span>
+            <input type="range" id="cfgRate" min="0.5" max="2" step="0.1" value="0.95" style="flex:1" />
+          </div>
+        </div>
+        <div class="setting-group">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+            <label class="setting-label" style="margin:0">Plugin Modules</label>
+            <button class="qa-btn" id="btnAddPlugin" style="width:auto;margin:0;padding:2px 8px;font-size:9px">+ ADD</button>
+          </div>
+          <div id="cfgPluginsList"
+            style="background:var(--surface-in);border:1px solid var(--border);border-radius:2px;padding:6px;max-height:80px;overflow-y:auto;font-size:11px;color:var(--text-lo)">
+            Loading...</div>
+        </div>
+        <button class="send-btn" id="saveSettings" data-i18n="save_settings">Save Settings</button>
       </div>
     </div>
-
-    <div id="files-tab-content" class="tab-content hidden">
-      <div id="file-manager" style="padding:10px;display:flex;flex-direction:column;height:100%">
-        <div style="display:flex;gap:4px;margin-bottom:8px">
-          <input id="file-path-input" type="text" style="flex:1;background:var(--surface-hi);border:1px solid var(--border);color:var(--text-hi);font-family:var(--font-mono);font-size:9px;padding:4px" placeholder="/"/>
-          <button id="file-go-btn" class="wc-btn" style="width:30px">GO</button>
-        </div>
-        <div id="file-list" style="flex:1;overflow-y:auto;font-family:var(--font-mono);font-size:10px;color:var(--text-mid)">
-          Loading files...
-        </div>
-      </div>
-    </div>
-  </aside>
-
-</main>
-
-<!-- TERMINAL -->
-<footer id="terminal">
-  <div class="term-header">
-    <span class="section-label">Terminal Log</span>
-    <button class="term-clear-btn" id="termClear">CLR</button>
   </div>
-  <div id="term-log" class="term-log"></div>
-</footer>
 
-<!-- SETTINGS OVERLAY -->
-<div id="settings-overlay" class="overlay hidden">
-  <div class="overlay-panel">
-    <div class="overlay-header">
-      <span class="section-label">Settings</span>
-      <button class="overlay-close" id="settingsClose">✕</button>
+  <!-- TOAST CONTAINER -->
+  <div id="toast-container"></div>
+
+  <!-- CONTEXT MENU -->
+  <div id="ctx-menu" class="ctx-menu hidden">
+    <div class="ctx-proc-name" id="ctxProcName"
+      style="padding:6px 14px;font-size:9px;color:#8a8078;font-family:var(--font-mono);letter-spacing:1px;border-bottom:1px solid rgba(180,40,30,0.15)">
     </div>
-    <div class="settings-body">
-      <div class="setting-group">
-        <label class="setting-label">AI Model (Ollama)</label>
-        <select id="cfgModel" class="setting-input" style="cursor:pointer">
-          <option value="qwen2.5">qwen2.5</option>
-          <option value="llama3.1">llama3.1</option>
-          <option value="llama3">llama3</option>
-          <option value="mistral">mistral</option>
-        </select>
-      </div>
-      <div class="setting-group">
-        <label class="setting-label" data-i18n="anthropic_key">Anthropic API Key (fallback)</label>
-        <input type="password" id="cfgAnthropic" class="setting-input" placeholder="sk-ant-..."/>
-      </div>
-      <div class="setting-group">
-        <label class="setting-label" data-i18n="openai_key">OpenAI API Key (fallback)</label>
-        <input type="password" id="cfgOpenai" class="setting-input" placeholder="sk-..."/>
-      </div>
-      <div class="setting-group">
-        <label class="setting-label" data-i18n="user_name">Your Name</label>
-        <input type="text" id="cfgName" class="setting-input" placeholder="Dante"/>
-      </div>
-      <button class="send-btn" id="saveSettings" data-i18n="save_settings">Save Settings</button>
-    </div>
+    <button class="ctx-item" id="ctxKill">⚡ Kill Process</button>
+    <button class="ctx-item" id="ctxAsk">? Ask Cardinal</button>
+    <button class="ctx-item" id="ctxRename" style="display:none">✎ Rename File</button>
+    <button class="ctx-item" id="ctxMove" style="display:none">➜ Move File</button>
   </div>
-</div>
 
-<!-- TOAST CONTAINER -->
-<div id="toast-container"></div>
-
-<!-- CONTEXT MENU -->
-<div id="ctx-menu" class="ctx-menu hidden">
-  <div class="ctx-proc-name" id="ctxProcName" style="padding:6px 14px;font-size:9px;color:#8a8078;font-family:var(--font-mono);letter-spacing:1px;border-bottom:1px solid rgba(180,40,30,0.15)"></div>
-  <button class="ctx-item" id="ctxKill">⚡ Kill Process</button>
-  <button class="ctx-item" id="ctxAsk">? Ask Cardinal</button>
-</div>
-
-<script src="js/i18n.js"></script>
-<script src="js/voice.js"></script>
-<script src="js/ai.js"></script>
-<script src="js/activity.js"></script>
-<script src="js/reminders.js"></script>
-<script src="js/renderer.js"></script>
+  <script src="js/i18n.js"></script>
+  <script src="js/voice.js"></script>
+  <script src="js/ai.js"></script>
+  <script src="js/activity.js"></script>
+  <script src="js/reminders.js"></script>
+  <script src="js/renderer.js"></script>
 </body>
+
 </html>
