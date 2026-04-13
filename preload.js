@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('api', {
   minimize: () => ipcRenderer.invoke('win-minimize'),
   maximize: () => ipcRenderer.invoke('win-maximize'),
   close: () => ipcRenderer.invoke('win-close'),
+  startDrag: () => ipcRenderer.send('window-drag'),
 
   // System info & monitor
   getSysInfo: () => ipcRenderer.invoke('get-sysinfo'),
@@ -21,6 +22,7 @@ contextBridge.exposeInMainWorld('api', {
   runDefender: () => ipcRenderer.invoke('run-defender'),
   runThreatScan: () => ipcRenderer.invoke('run-threat-scan'),
   elevateAdmin: () => ipcRenderer.invoke('elevate-admin'),
+  blockIp: (ip) => ipcRenderer.invoke('block-ip', ip),
 
   // AI
   aiChat: (p) => ipcRenderer.invoke('ai-chat', p),

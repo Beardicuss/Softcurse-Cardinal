@@ -20,7 +20,37 @@ const Voice = (() => {
     onStateChange?.(val);
   }
 
+  function startWakeWordListener(triggerCb) {
+    if (!SpeechRecognition) return false;
+    if (!recognition) {
+      recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = false;
+      recognition.lang = langMap[I18n?.getLocale?.() || 'en'] || 'en-US';
+
+      recognition.onresult = (e) => {
+        if (listening) return; // Ignore if we are actively communicating
+        const transcript = e.results[e.results.length - 1][0].transcript.trim().toLowerCase();
+
+        // Exact wake word threshold logic
+        if (WAKE_WORDS.some(w => transcript.includes(w))) {
+          if (triggerCb) triggerCb();
+        }
+      };
+
+      // Restart silently if OS kills the background listen stream
+      recognition.onend = () => {
+        if (!listening) {
+          try { recognition.start(); } catch (e) { }
+        }
+      };
+
+      try { recognition.start(); } catch (e) { }
+    }
+  }
+
   async function start(cb, stateCb) {
+    if (recognition) { try { recognition.stop(); } catch (e) { } }
     onResult = cb;
     onStateChange = stateCb;
 
@@ -71,6 +101,10 @@ const Voice = (() => {
     } else {
       setListening(false);
     }
+    // Re-engage passive wake-word layer
+    if (recognition && !listening) {
+      setTimeout(() => { try { recognition.start(); } catch (e) { } }, 500);
+    }
   }
 
   function toggle(cb, stateCb) {
@@ -109,5 +143,5 @@ const Voice = (() => {
   function isListening() { return listening; }
   function isAvailable() { return !!SpeechRecognition; }
 
-  return { start, stop, toggle, speak, updateLang, setConfig, isListening, isAvailable };
+  return { start, stop, toggle, startWakeWordListener, speak, updateLang, setConfig, isListening, isAvailable };
 })();

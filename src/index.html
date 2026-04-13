@@ -31,10 +31,79 @@
     .net-item:hover {
       background: rgba(180, 40, 30, 0.05);
     }
+
+    * {
+      cursor: none !important;
+    }
+
+    @keyframes cursorAnim {
+
+      0%,
+      24.9% {
+        background-image: url('assets/cursor/01.png');
+      }
+
+      25%,
+      49.9% {
+        background-image: url('assets/cursor/02.png');
+      }
+
+      50%,
+      74.9% {
+        background-image: url('assets/cursor/03.png');
+      }
+
+      75%,
+      99.9% {
+        background-image: url('assets/cursor/04.png');
+      }
+
+      100% {
+        background-image: url('assets/cursor/01.png');
+      }
+    }
+
+    @keyframes selectAnim {
+
+      0%,
+      33.2% {
+        background-image: url('assets/cursor/s-1.png');
+      }
+
+      33.3%,
+      66.5% {
+        background-image: url('assets/cursor/s-2.png');
+      }
+
+      66.6%,
+      100% {
+        background-image: url('assets/cursor/s-3.png');
+      }
+    }
+
+    #cyber-cursor {
+      position: fixed;
+      pointer-events: none;
+      z-index: 999999;
+      width: 48px;
+      height: 48px;
+      background-position: left top;
+      background-size: contain;
+      background-repeat: no-repeat;
+      background-image: url('assets/cursor/01.png');
+      animation: cursorAnim 0.6s infinite;
+      left: -100px;
+      top: -100px;
+    }
+
+    #cyber-cursor.select-mode {
+      animation: selectAnim 0.45s infinite;
+    }
   </style>
 </head>
 
 <body>
+  <div id="cyber-cursor"></div>
 
   <!-- TOP BAR -->
   <header id="topbar">
@@ -239,7 +308,7 @@
         <button class="tab-btn active" data-tab="health"
           style="flex:1;background:none;border:none;color:var(--text-lo);font-family:var(--font-mono);font-size:9px;padding:8px;cursor:pointer;letter-spacing:1px">HEALTH</button>
         <button class="tab-btn" data-tab="startup"
-          style="flex:1;background:none;border:none;color:var(--text-lo);font-family:var(--font-mono);font-size:9px;padding:8px;cursor:pointer;letter-spacing:1px">STARTUP</button>
+          style="flex:1;background:none;border:none;color:var(--text-lo);font-family:var(--font-mono);font-size:9px;padding:8px;cursor:pointer;letter-spacing:1px">TASKS</button>
         <button class="tab-btn" data-tab="files"
           style="flex:1;background:none;border:none;color:var(--text-lo);font-family:var(--font-mono);font-size:9px;padding:8px;cursor:pointer;letter-spacing:1px">FILES</button>
       </div>
@@ -300,10 +369,15 @@
       <div id="startup-tab-content" class="tab-content hidden"
         style="flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden">
         <div style="padding:10px;display:flex;flex-direction:column;height:100%;gap:6px">
-          <div class="section-label" style="flex-shrink:0">Startup Manager</div>
+          <div class="section-label" style="flex-shrink:0">OS Startup Manager</div>
           <div id="startup-list"
             style="flex:1;overflow-y:auto;font-family:var(--font-mono);font-size:11px;color:var(--text-mid);padding-bottom:10px;min-height:0">
             Loading system entries...</div>
+
+          <div class="section-label" style="flex-shrink:0; margin-top:8px">Scheduled Tasks (Cron)</div>
+          <div id="schtasks-list"
+            style="flex:1;overflow-y:auto;font-family:var(--font-mono);font-size:11px;color:var(--text-mid);padding-bottom:10px;min-height:0">
+            Loading cron jobs...</div>
         </div>
       </div>
 
@@ -352,61 +426,90 @@
         <span class="section-label">Settings</span>
         <button class="overlay-close" id="settingsClose">✕</button>
       </div>
-      <div class="settings-body">
-        <div class="setting-group">
-          <label class="setting-label">AI Model (Ollama)</label>
-          <select id="cfgModel" class="setting-input" style="cursor:pointer">
-            <option value="qwen2.5">qwen2.5</option>
-            <option value="llama3.1">llama3.1</option>
-            <option value="llama3">llama3</option>
-            <option value="mistral">mistral</option>
-          </select>
-        </div>
-        <div class="setting-group">
-          <label class="setting-label" data-i18n="anthropic_key">Anthropic API Key (fallback)</label>
-          <input type="password" id="cfgAnthropic" class="setting-input" placeholder="sk-ant-..." />
-        </div>
-        <div class="setting-group">
-          <label class="setting-label" data-i18n="openai_key">OpenAI API Key (fallback)</label>
-          <input type="password" id="cfgOpenai" class="setting-input" placeholder="sk-..." />
-        </div>
-        <div class="setting-group">
-          <label class="setting-label">Gemini API Key (fallback)</label>
-          <input type="password" id="cfgGemini" class="setting-input" placeholder="AIza..." />
-        </div>
-        <div class="setting-group">
-          <label class="setting-label">OpenRouter API Key (fallback)</label>
-          <input type="password" id="cfgOpenRouter" class="setting-input" placeholder="sk-or-v1-..." />
-        </div>
-        <div class="setting-group">
-          <label class="setting-label" data-i18n="user_name">Your Name</label>
-          <input type="text" id="cfgName" class="setting-input" placeholder="Dante" />
+
+      <!-- Internal Tab Bar -->
+      <div class="panel-tabs" style="display:flex;border-bottom:1px solid var(--border);background:var(--surface)">
+        <button class="tab-btn active" data-settab="ai"
+          style="flex:1;background:none;border:none;color:var(--text-lo);font-family:var(--font-mono);font-size:9px;padding:8px;cursor:pointer;letter-spacing:1px">AI
+          CORE</button>
+        <button class="tab-btn" data-settab="sys"
+          style="flex:1;background:none;border:none;color:var(--text-lo);font-family:var(--font-mono);font-size:9px;padding:8px;cursor:pointer;letter-spacing:1px">GENERAL</button>
+      </div>
+
+      <div class="settings-body" style="padding-top:10px;">
+        <!-- AI CORE TAB -->
+        <div id="set-tab-ai" class="set-content">
+          <div class="setting-group"
+            style="padding-bottom:10px; border-bottom:1px solid var(--border); margin-bottom:10px;">
+            <label class="setting-label"
+              style="display:flex;align-items:center;justify-content:space-between;cursor:pointer">
+              <span>Local Ollama Auto-Start</span>
+              <input type="checkbox" id="cfgOllamaAuto" style="cursor:pointer" />
+            </label>
+            <div style="font-size:9px;color:var(--text-ghost);margin-top:4px;">Automatically execute Ollama boot/kill
+              daemons linked to the application cycle. Disable this to utilize Cloud LLM Fallbacks natively.</div>
+          </div>
+          <div class="setting-group">
+            <label class="setting-label">AI Model (Ollama)</label>
+            <select id="cfgModel" class="setting-input" style="cursor:pointer">
+              <option value="qwen2.5">qwen2.5</option>
+              <option value="llama3.1">llama3.1</option>
+              <option value="llama3">llama3</option>
+              <option value="mistral">mistral</option>
+            </select>
+          </div>
+          <div class="setting-group">
+            <label class="setting-label">Gemini API Key (v1beta / flash)</label>
+            <input type="password" id="cfgGemini" class="setting-input" placeholder="AIza..." />
+          </div>
+          <div class="setting-group">
+            <label class="setting-label">OpenRouter API Key (fallback)</label>
+            <input type="password" id="cfgOpenRouter" class="setting-input" placeholder="sk-or-v1-..." />
+          </div>
+          <div class="setting-group">
+            <label class="setting-label" data-i18n="anthropic_key">Anthropic API Key (fallback)</label>
+            <input type="password" id="cfgAnthropic" class="setting-input" placeholder="sk-ant-..." />
+          </div>
+          <div class="setting-group" style="margin-bottom:0">
+            <label class="setting-label" data-i18n="openai_key">OpenAI API Key (fallback)</label>
+            <input type="password" id="cfgOpenai" class="setting-input" placeholder="sk-..." />
+          </div>
         </div>
 
-        <div class="setting-group">
-          <label class="setting-label">Voice Characteristics</label>
-          <select id="cfgVoice" class="setting-input" style="cursor:pointer;margin-bottom:6px">
-            <option value="default">System Default</option>
-          </select>
-          <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
-            <span style="font-size:10px;color:var(--text-lo);width:30px">Pitch</span>
-            <input type="range" id="cfgPitch" min="0" max="2" step="0.1" value="0.9" style="flex:1" />
+        <!-- GENERAL TAB -->
+        <div id="set-tab-sys" class="set-content hidden">
+          <div class="setting-group">
+            <label class="setting-label" data-i18n="user_name">Your Name</label>
+            <input type="text" id="cfgName" class="setting-input" placeholder="Dante" />
           </div>
-          <div style="display:flex;align-items:center;gap:10px">
-            <span style="font-size:10px;color:var(--text-lo);width:30px">Rate</span>
-            <input type="range" id="cfgRate" min="0.5" max="2" step="0.1" value="0.95" style="flex:1" />
+          <div class="setting-group">
+            <label class="setting-label">Voice Characteristics</label>
+            <select id="cfgVoice" class="setting-input" style="cursor:pointer;margin-bottom:6px">
+              <option value="default">System Default</option>
+            </select>
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+              <span style="font-size:10px;color:var(--text-lo);width:30px">Pitch</span>
+              <input type="range" id="cfgPitch" min="0" max="2" step="0.1" value="0.9" style="flex:1" />
+            </div>
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="font-size:10px;color:var(--text-lo);width:30px">Rate</span>
+              <input type="range" id="cfgRate" min="0.5" max="2" step="0.1" value="0.95" style="flex:1" />
+            </div>
+          </div>
+          <div class="setting-group" style="margin-bottom:0">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+              <label class="setting-label" style="margin:0">Plugin Modules</label>
+              <button class="qa-btn" id="btnAddPlugin" style="width:auto;margin:0;padding:2px 8px;font-size:9px">+
+                ADD</button>
+            </div>
+            <div id="cfgPluginsList"
+              style="background:var(--surface-in);border:1px solid var(--border);border-radius:2px;padding:6px;max-height:80px;overflow-y:auto;font-size:11px;color:var(--text-lo)">
+              Loading...</div>
           </div>
         </div>
-        <div class="setting-group">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-            <label class="setting-label" style="margin:0">Plugin Modules</label>
-            <button class="qa-btn" id="btnAddPlugin" style="width:auto;margin:0;padding:2px 8px;font-size:9px">+ ADD</button>
-          </div>
-          <div id="cfgPluginsList"
-            style="background:var(--surface-in);border:1px solid var(--border);border-radius:2px;padding:6px;max-height:80px;overflow-y:auto;font-size:11px;color:var(--text-lo)">
-            Loading...</div>
-        </div>
-        <button class="send-btn" id="saveSettings" data-i18n="save_settings">Save Settings</button>
+
+        <button class="send-btn" id="saveSettings" data-i18n="save_settings" style="margin-top:14px">Save
+          Settings</button>
       </div>
     </div>
   </div>

@@ -25,6 +25,8 @@ const AI = (() => {
     browser_fill: async (p) => window.api.browserAuto({ url: p.url, action: 'fill', data: p.data }),
     elevate_admin: async () => window.api.elevateAdmin(),
     update_profile: async (p) => window.api.updateProfile(p.key, p.val),
+    block_ip: async (p) => window.api.blockIp(p.ip),
+    read_event_logs: async (p) => window.api.getEventLogs(p),
   };
 
   function buildSystemPrompt() {
@@ -33,12 +35,23 @@ const AI = (() => {
     const top = sysState.processes?.[0];
     const profile = sysState.profile || {};
 
+    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const currentDay = days[now.getDay()];
+    const isoDate = now.toISOString().split('T')[0];
+    const localTime = now.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+
     return `You are Cardinal, an OS commander and companion built by Softcurse Systems.
 You are direct, composed, observant, and occasionally dry-witted.
 You have full situational awareness of the machine you run on.
 You learn the user's patterns: working hours, frequent apps, and habits.
+
+[--- Temporal Context ---]
+Current Date & Time: ${currentDay}, ${isoDate} at ${localTime}
+
+[--- Operational Profile ---]
 Current Profile: ${JSON.stringify(profile)}
 ${userName ? `The user's name is ${userName}. Address them occasionally by name.` : ''}
+
 Keep responses concise and purposeful. No filler. You can use markdown in chat.
 
 When you need to take an action, append a JSON block at the very end of your reply:
@@ -58,6 +71,8 @@ Available actions:
 - browser_fill       params: { url: string, data: object } — fill form fields (key=selector, val=text)
 - elevate_admin      (no params) — request admin rights on Windows
 - update_profile     params: { key: string, val: any } — update user profile/habits
+- block_ip           params: { ip: string } — sever all native socket traffic to a foreign IP instantly
+- read_event_logs    params: { logName: string, limit: number } — read 'System' or 'Application' error logs
 ${pluginDescriptions.join('\n')}
 
 Only include the JSON block when an action is actually needed. Never fabricate it.

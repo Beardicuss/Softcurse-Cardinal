@@ -1,7 +1,15 @@
 // ── system.js — native-free OS utilities ──────────────────────────────────────
 const { exec } = require('child_process');
-const util      = require('util');
+const util = require('util');
 const execAsync = util.promisify(exec);
+const si = require('systeminformation');
+const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
+const http = require('http');
+
+// Geo-IP Cache to respect API limits
+const geoCache = new Map();
 
 /**
  * FIX 4: Get active window title using shell only — no native modules.
@@ -53,16 +61,67 @@ async function runQuickThreatScan() {
       ).catch(() => ({ stdout: '[]' }));
 
       let startups = [];
-      try { startups = JSON.parse(startupRes.stdout || '[]'); } catch {}
+      try { startups = JSON.parse(startupRes.stdout || '[]'); } catch { }
       if (!Array.isArray(startups)) startups = startups ? [startups] : [];
 
       const suspicious = [/temp/i, /appdata.*\\[a-z]{8,}/i, /\.vbs$/i, /\.bat$/i, /powershell.*hidden/i];
-      startups.forEach(s => {
-        if (s && suspicious.some(p => p.test(s.Command || ''))) {
-          findings.push({ type: 'startup', level: 'warn', msg: 'Suspicious startup: ' + s.Name });
+
+      // Known bad SHA-256 hashes (e.g. well-known malicious payloads or test hashes)
+      const badHashes = new Set([
+        'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855' // empty hash example
+      ]);
+
+      for (const s of startups) {
+        if (!s || !s.Command) continue;
+
+        let flagged = false;
+        if (suspicious.some(p => p.test(s.Command))) {
+          findings.push({ type: 'startup', level: 'warn', msg: 'Heuristic Match: ' + s.Name });
           deductions += 5;
+          flagged = true;
         }
-      });
+
+        // Extract filePath from Command string e.g., "C:\path\to\file.exe" -arg
+        const match = s.Command.match(/(?:")([^"]+\.exe)(?:")|([^ ]+\.exe)/i);
+        const exePath = match ? (match[1] || match[2]) : null;
+
+        if (exePath && fs.existsSync(exePath)) {
+          try {
+            // 1. Validate against SHA-256 list
+            const hash = crypto.createHash('sha256');
+            const data = fs.readFileSync(exePath); // Memory limit warning on massive files!
+            hash.update(data);
+            const hex = hash.digest('hex');
+
+            if (badHashes.has(hex.toLowerCase())) {
+              findings.push({ type: 'startup_hash', level: 'warn', msg: 'Malicious Hash Detected: ' + exePath });
+              deductions += 15;
+            }
+
+            // 2. YARA Sweep across user plugins
+            const reqUserPath = (process.env.APPDATA || (process.platform == 'darwin' ? process.env.HOME + '/Library/Preferences' : process.env.HOME + "/.local/share")) + '/cardinal/plugins';
+            if (fs.existsSync(reqUserPath)) {
+              const yaras = fs.readdirSync(reqUserPath).filter(f => f.endsWith('.yara'));
+              for (const yf of yaras) {
+                const ruleText = fs.readFileSync(path.join(reqUserPath, yf), 'utf-8');
+                // Extract rudimentary strings from basic YARA syntax: $a = "malicious_string"
+                const strMatches = [...ruleText.matchAll(/\$[^=]+\s*=\s*"([^"]+)"/g)].map(m => m[1]);
+                if (strMatches.length > 0) {
+                  const contentStr = data.toString('utf-8');
+                  for (const target of strMatches) {
+                    if (contentStr.includes(target) && !flagged) {
+                      findings.push({ type: 'yara_match', level: 'warn', msg: `YARA Rule Match [${yf}]: ${exePath}` });
+                      deductions += 15;
+                      flagged = true;
+                      break;
+                    }
+                  }
+                }
+              }
+            }
+          } catch (e) { /* File locked or too large */ }
+        }
+      }
 
       // Check hosts file for custom entries
       const hostsRes = await execAsync(
@@ -112,16 +171,57 @@ async function runQuickThreatScan() {
 }
 
 /**
- * Count established network connections.
+ * Hardened Network Connection analyzer. 
+ * Maps remote ESTABLISHED IP sockets to local PIDs explicitly alongside Geo-IP location.
  */
-async function getOpenConnections() {
+async function analyzeNetworkConnections() {
   try {
-    const cmd = process.platform === 'win32'
-      ? 'powershell -NoProfile -Command "(netstat -n | Select-String ESTABLISHED).Count"'
-      : "netstat -tn 2>/dev/null | grep -c ESTABLISHED || echo 0";
-    const { stdout } = await execAsync(cmd, { timeout: 4000 });
-    return parseInt(stdout.trim()) || 0;
-  } catch { return 0; }
+    const conns = await si.networkConnections();
+    const active = [];
+
+    for (const c of conns) {
+      if (c.state !== 'ESTABLISHED') continue;
+      const ip = c.peeraddress;
+      if (!ip || ip.includes('*') || ip === '127.0.0.1' || ip === '::1' || ip === '0.0.0.0' || ip.startsWith('192.168.') || ip.startsWith('10.')) continue;
+
+      // Fetch geo-data dynamically mapping active foreign blocks
+      if (!geoCache.has(ip)) {
+        try {
+          const data = await new Promise((resolve, reject) => {
+            const req = http.get(`http://ip-api.com/json/${ip}?fields=country,isp`, { timeout: 2000 }, (res) => {
+              if (res.statusCode !== 200) { res.resume(); return reject(new Error('Status: ' + res.statusCode)); }
+              let body = '';
+              res.on('data', chunk => body += chunk);
+              res.on('end', () => { try { resolve(JSON.parse(body)); } catch (e) { reject(e); } });
+            }).on('error', reject).on('timeout', () => { req.destroy(); reject(new Error('Timeout')); });
+          });
+          geoCache.set(ip, data);
+        } catch (e) {
+          geoCache.set(ip, { country: 'Unknown' });
+        }
+      }
+
+      const geo = geoCache.get(ip);
+      active.push({
+        pid: c.pid,
+        process: c.process || 'Unknown',
+        peerIp: c.peeraddress,
+        peerPort: c.peerport,
+        country: geo.country || 'Unknown',
+        isp: geo.isp || 'Unknown'
+      });
+    }
+
+    // Deduplicate same IP/PID combinations
+    const unique = [];
+    const seen = new Set();
+    for (const a of active) {
+      const key = `${a.pid}-${a.peerIp}`;
+      if (!seen.has(key)) { seen.add(key); unique.push(a); }
+    }
+
+    return unique;
+  } catch { return []; }
 }
 
 /**
@@ -131,19 +231,19 @@ async function clearSystemCache() {
   const results = [];
   try {
     if (process.platform === 'win32') {
-      await execAsync('del /s /q "%TEMP%\\*" 2>nul').catch(() => {});
+      await execAsync('del /s /q "%TEMP%\\*" 2>nul').catch(() => { });
       results.push('User temp cleared');
-      await execAsync('RunDll32.exe InetCpl.cpl,ClearMyTracksByProcess 255').catch(() => {});
+      await execAsync('RunDll32.exe InetCpl.cpl,ClearMyTracksByProcess 255').catch(() => { });
       results.push('IE/Edge cache flushed');
     } else if (process.platform === 'darwin') {
-      await execAsync('rm -rf ~/Library/Caches/* 2>/dev/null').catch(() => {});
+      await execAsync('rm -rf ~/Library/Caches/* 2>/dev/null').catch(() => { });
       results.push('macOS user caches cleared');
     } else {
-      await execAsync('rm -rf ~/.cache/* 2>/dev/null').catch(() => {});
+      await execAsync('rm -rf ~/.cache/* 2>/dev/null').catch(() => { });
       results.push('Linux user cache cleared');
     }
-  } catch {}
+  } catch { }
   return results;
 }
 
-module.exports = { getActiveWindowTitle, runQuickThreatScan, getOpenConnections, clearSystemCache };
+module.exports = { getActiveWindowTitle, runQuickThreatScan, analyzeNetworkConnections, clearSystemCache };

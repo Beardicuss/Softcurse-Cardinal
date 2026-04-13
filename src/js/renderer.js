@@ -18,6 +18,35 @@
   // ── Sparkline data ───────────────────────────────────────────────────────
   const sparkHistory = { cpu: [], ram: [] };
 
+  // ── Acoustics ────────────────────────────────────────────────────────────
+  const sounds = {
+    startup: new Audio('assets/sounds/startup.wav'),
+    micOn: new Audio('assets/sounds/mic_on.wav'),
+    processing: new Audio('assets/sounds/processing.wav'),
+    threat: new Audio('assets/sounds/threat_detect.wav'),
+    toast: new Audio('assets/sounds/toast_notify.wav')
+  };
+  sounds.processing.loop = true;
+  sounds.startup.volume = 0.5;
+  sounds.processing.volume = 0.5;
+
+  function playSound(name) {
+    try {
+      const s = sounds[name];
+      if (!s) return;
+      if (name !== 'processing') s.currentTime = 0;
+      s.play().catch(() => { });
+    } catch (e) { }
+  }
+  function stopSound(name) {
+    try {
+      const s = sounds[name];
+      if (!s) return;
+      s.pause();
+      s.currentTime = 0;
+    } catch (e) { }
+  }
+
   // ═══════════════════════════════════════════════════════════════════════
   // HELPER FUNCTIONS — all defined before boot so they're available
   // ═══════════════════════════════════════════════════════════════════════
@@ -84,6 +113,7 @@
 
   function showThinking() {
     try {
+      playSound('processing');
       const log = $('chat-log');
       if (!log || $('thinkDots')) return;
       const div = document.createElement('div');
@@ -96,12 +126,16 @@
   }
 
   function hideThinking() {
-    try { $('thinkDots')?.remove(); } catch (e) { }
+    try {
+      stopSound('processing');
+      $('thinkDots')?.remove();
+    } catch (e) { }
   }
 
   // ── Toast ─────────────────────────────────────────────────────────────────
   function showToast(title, message, duration) {
     try {
+      playSound('toast');
       const container = $('toast-container');
       if (!container) return;
       const t = document.createElement('div');
@@ -336,7 +370,7 @@
       if (result) {
         appendMsg('ai', result.text);
         Voice.speak(result.text);
-        term('[CARDINAL]', `[${result.provider || '?'}] ${result.text.slice(0, 80)}`, 't-cardinal');
+        term('[CARDINAL]', result.text.slice(0, 80), 't-cardinal');
         if (result.action) term('[ACTION]', `Executed: ${result.action.action}`, 't-proc');
         if (!result.ok) term('[ERROR]', 'No AI provider reachable', 't-error');
       }
@@ -532,22 +566,42 @@
         showToast('System Alert', `Disk usage is at ${data.diskPct}%. Consider running Clear Cache.`);
       }
       if (data.diskPct < 85) window.diskAlerted = false;
+
+      // Browser overload alert
+      if (data.browserProcs > 40 && !window.browserAlerted) {
+        window.browserAlerted = true;
+        showToast('Resource Warning', `Detected ${data.browserProcs} browser processes running concurrently. Closing unused tabs might free up RAM.`);
+      }
+      if (data.browserProcs < 30) window.browserAlerted = false;
     } catch (e) { console.warn('system-update error:', e); }
   });
 
   // ── Threat update ──────────────────────────────────────────────────────
+  let lastThreatScore = 100;
   window.api.on('threat-update', (data) => {
     try {
       const score = data.score ?? 98;
+      if (score < 80 && score < lastThreatScore) playSound('threat');
+      lastThreatScore = score;
+
       setText('mIntegrity', score);
       const iBar = $('integrityBar');
       if (iBar) { iBar.style.width = score + '%'; iBar.style.background = score > 80 ? '#5aaa70' : score > 60 ? '#d4712a' : '#c8392b'; }
       const finds = data.findings || [];
       updateThreatBar('tbarMalware', finds.some(f => f.type === 'startup') ? 35 : 5, '#c8392b');
       updateThreatBar('tbarAdware', finds.some(f => f.type === 'hosts') ? 28 : 8, '#d4712a');
-      updateThreatBar('tbarNetwork', (data.conns || 0) > 50 ? 45 : 12, '#d4712a');
+      updateThreatBar('tbarNetwork', (Array.isArray(data.conns) ? data.conns.length : data.conns || 0) > 50 ? 45 : 12, '#d4712a');
       updateThreatBar('tbarIntegrity', score > 80 ? 3 : 22, '#5aaa70');
       finds.forEach(f => term('[SCAN]', f.msg, f.level === 'warn' ? 't-error' : 't-sys'));
+
+      // Log active foreign sockets directly into terminal
+      if (Array.isArray(data.conns) && data.conns.length > 0) {
+        const untrusted = data.conns.filter(c => c.country !== 'Unknown' && c.country !== 'United States' && c.country !== 'Undefined');
+        if (untrusted.length > 0) {
+          term('[NET-GEO]', `Detected ${untrusted.length} foreign socket bindings.`, 't-error');
+          untrusted.slice(0, 5).forEach(c => term('[NET-GEO]', `${c.process} (PID:${c.pid}) bounds to ${c.peerIp} [${c.country}]`, 't-error'));
+        }
+      }
     } catch (e) { }
   });
 
@@ -575,6 +629,67 @@
   // WIRE UP UI CONTROLS
   // ═══════════════════════════════════════════════════════════════════════
 
+  // Global Cyber S Custom Cursor Tracker
+  const cyberCursor = document.getElementById('cyber-cursor');
+  if (cyberCursor) {
+    document.addEventListener('mousemove', (e) => {
+      // Use requestAnimationFrame natively inside browser engine if performance drops
+      // but direct sub-pixel offset application works best for 120hz/144hz UI
+      cyberCursor.style.left = e.clientX + 'px';
+      cyberCursor.style.top = e.clientY + 'px';
+    }, { passive: true });
+
+    // Add glowing hover/click reactions
+    document.addEventListener('mousedown', () => cyberCursor.style.transform = 'scale(0.85)');
+    document.addEventListener('mouseup', () => cyberCursor.style.transform = 'scale(1)');
+
+    // Custom pure-JS Window Dragging Hook replacing native `-webkit-app-region: drag`
+    const topBar = document.getElementById('topbar');
+    if (topBar) {
+      topBar.addEventListener('mousedown', (e) => {
+        if (e.target.closest('button, .clickable, select, input, .title-text, span, img')) return;
+        if (window.api && window.api.startDrag) window.api.startDrag();
+      });
+      topBar.addEventListener('dblclick', (e) => {
+        if (e.target.closest('button, .clickable, select, input, .title-text, span, img')) return;
+        if (window.api && window.api.maximize) window.api.maximize();
+      });
+    }
+
+    // Toggle selection/hover state frames
+    document.addEventListener('mouseover', (e) => {
+      if (!e.target || !e.target.closest) return;
+      const isInteractable = e.target.closest('a, button, input, textarea, select, [contenteditable="true"], .clickable');
+      const style = window.getComputedStyle(e.target);
+      if (isInteractable || style.cursor === 'text' || style.cursor === 'pointer') {
+        cyberCursor.classList.add('select-mode');
+      }
+    });
+
+    document.addEventListener('mouseout', (e) => {
+      cyberCursor.classList.remove('select-mode');
+    });
+  }
+
+  // Window Resizers (Drag-And-Drop)
+  const resizerLeft = $('resizer-left');
+  const panelLeft = $('panel-left');
+  if (resizerLeft && panelLeft) {
+    let isResizing = false;
+    resizerLeft.addEventListener('mousedown', e => { isResizing = true; document.body.style.cursor = 'col-resize'; e.preventDefault(); });
+    window.addEventListener('mousemove', e => { if (isResizing) { const w = Math.max(200, Math.min(e.clientX, window.innerWidth / 2)); panelLeft.style.width = w + 'px'; } });
+    window.addEventListener('mouseup', () => { isResizing = false; document.body.style.cursor = 'default'; });
+  }
+
+  const resizerRight = $('resizer-right');
+  const panelRight = $('panel-right');
+  if (resizerRight && panelRight) {
+    let isResizing = false;
+    resizerRight.addEventListener('mousedown', e => { isResizing = true; document.body.style.cursor = 'col-resize'; e.preventDefault(); });
+    window.addEventListener('mousemove', e => { if (isResizing) { const w = Math.max(180, Math.min(window.innerWidth - e.clientX, window.innerWidth / 2)); panelRight.style.width = w + 'px'; } });
+    window.addEventListener('mouseup', () => { isResizing = false; document.body.style.cursor = 'default'; });
+  }
+
   // Chat input
   const sendBtn = $('sendBtn');
   const chatInput = $('chatInput');
@@ -584,7 +699,8 @@
   // Mic button
   const micBtn = $('micBtn');
   if (micBtn) micBtn.onclick = () => {
-    if (!Voice.isAvailable()) { showToast('Voice', 'Web Speech API not available.'); return; }
+    playSound('micOn');
+    if (!Voice.isAvailable()) { showToast('Voice', 'Microphone API not available.'); return; }
     Voice.toggle(
       (text, isFinal) => { if (isFinal && text && chatInput) { chatInput.value = text; sendMessage(text); } },
       (active) => {
@@ -594,6 +710,19 @@
       }
     );
   };
+
+  // Initialize Always-On Acoustic Engine for passive triggers
+  if (typeof Voice !== 'undefined' && Voice.isAvailable()) {
+    setTimeout(() => {
+      Voice.startWakeWordListener(() => {
+        if (!Voice.isListening() && micBtn) {
+          term('[VOICE]', 'Wake Word detected. System listening.', 't-cardinal');
+          micBtn.click();
+        }
+      });
+      term('[SYS]', 'Acoustic Subsystem online (Listening for explicit wake-word)', 't-sys');
+    }, 1500);
+  }
 
   // Terminal clear
   const termClear = $('termClear');
@@ -730,6 +859,33 @@
           else btn.textContent = 'ERR';
         };
       });
+
+      // Load Scheduled Tasks
+      const schlist = $('schtasks-list');
+      if (schlist) {
+        schlist.innerHTML = 'Fetching cron jobs...';
+        const tasksCsv = await window.api.getScheduledTasks();
+        if (typeof tasksCsv !== 'string' || tasksCsv.includes('Error')) {
+          schlist.innerHTML = 'Unavailable';
+        } else {
+          // Rudimentary CSV parse
+          const lines = tasksCsv.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+          if (lines.length > 1) {
+            lines.shift(); // remove header
+            schlist.innerHTML = lines.map((l) => {
+              const parts = l.split('","');
+              if (parts.length < 2) return '';
+              const tName = parts[0].replace('"', '');
+              let tNext = parts[1].replace('"', '');
+              return `<div style="padding:4px;border-bottom:1px solid rgba(255,255,255,0.05);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+                ${tName}<br><span style="color:var(--text-ghost);font-size:9px">Next Run: ${tNext}</span>
+              </div>`;
+            }).join('');
+          } else {
+            schlist.innerHTML = 'No active tasks found.';
+          }
+        }
+      }
     } catch (e) { }
   }
 
@@ -789,6 +945,7 @@
       if ($('cfgOpenRouter')) $('cfgOpenRouter').value = cfg.openRouterKey || '';
       if ($('cfgPitch')) $('cfgPitch').value = cfg.pitch || 0.9;
       if ($('cfgRate')) $('cfgRate').value = cfg.rate || 0.95;
+      if ($('cfgOllamaAuto')) $('cfgOllamaAuto').checked = !!cfg.ollamaAuto;
 
       const vSel = $('cfgVoice');
       if (vSel) {
@@ -821,6 +978,17 @@
   $('settingsClose') && ($('settingsClose').onclick = () => $('settings-overlay')?.classList.add('hidden'));
   $('settings-overlay') && ($('settings-overlay').onclick = e => { if (e.target === $('settings-overlay')) $('settings-overlay').classList.add('hidden'); });
 
+  // Settings Tab Switcher
+  document.querySelectorAll('.tab-btn[data-settab]').forEach(btn => {
+    btn.onclick = () => {
+      document.querySelectorAll('.tab-btn[data-settab]').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.set-content').forEach(c => c.classList.add('hidden'));
+      btn.classList.add('active');
+      const target = $('set-tab-' + btn.dataset.settab);
+      if (target) target.classList.remove('hidden');
+    };
+  });
+
   $('btnAddPlugin') && ($('btnAddPlugin').onclick = async () => {
     try {
       const res = await window.api.importPlugin();
@@ -849,7 +1017,8 @@
         lang: I18n.getLocale(),
         voice: $('cfgVoice')?.value || 'default',
         pitch: parseFloat($('cfgPitch')?.value) || 0.9,
-        rate: parseFloat($('cfgRate')?.value) || 0.95
+        rate: parseFloat($('cfgRate')?.value) || 0.95,
+        ollamaAuto: $('cfgOllamaAuto')?.checked || false
       };
       await window.api.saveConfig(cfg);
       config = cfg;
@@ -952,6 +1121,7 @@
   // DONE
   // ═══════════════════════════════════════════════════════════════════════
   term('[CARDINAL]', 'All systems armed and ready', 't-cardinal');
+  playSound('startup');
 
 })().catch(e => {
   // Last-resort catch — log to console if the entire IIFE somehow throws

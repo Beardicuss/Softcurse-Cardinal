@@ -5,13 +5,39 @@ const { exec } = require('child_process');
 const util = require('util');
 const execAsync = util.promisify(exec);
 const fs = require('fs');
-const { getActiveWindowTitle, runQuickThreatScan, getOpenConnections, clearSystemCache } = require('./src/js/system.js');
+const http = require('http');
+const https = require('https');
+const { getActiveWindowTitle, runQuickThreatScan, analyzeNetworkConnections, clearSystemCache } = require('./src/js/system.js');
+
+function nativeFetch(url, opts = {}) {
+  return new Promise((resolve, reject) => {
+    const { method = 'GET', headers = {}, body } = opts;
+    const client = url.startsWith('https') ? https : http;
+    const req = client.request(url, { method, headers }, res => {
+      let data = [];
+      res.on('data', chunk => data.push(chunk));
+      res.on('end', () => {
+        const buf = Buffer.concat(data);
+        resolve({
+          ok: res.statusCode >= 200 && res.statusCode < 300,
+          status: res.statusCode,
+          json: async () => JSON.parse(buf.toString()),
+          text: async () => buf.toString()
+        });
+      });
+    });
+    req.on('error', err => reject(err));
+    if (body) req.write(typeof body === 'string' ? body : JSON.stringify(body));
+    req.end();
+  });
+}
+
 // ── Abort helper — avoids Chromium chunked_data_pipe error from AbortSignal.timeout ──
-function fetchWithTimeout(url, opts, ms = 25000) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), ms);
-  return fetch(url, { ...opts, signal: controller.signal })
-    .finally(() => clearTimeout(timer));
+function fetchWithTimeout(url, opts = {}, ms = 25000) {
+  return Promise.race([
+    nativeFetch(url, opts),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), ms))
+  ]);
 }
 
 
@@ -128,6 +154,7 @@ async function startMonitoring() {
         upload: +(net.tx_sec / 1048576 || 0).toFixed(2),
         download: +(net.rx_sec / 1048576 || 0).toFixed(2),
         netConns: procs.list.length,
+        browserProcs: procs.list.filter(p => ['chrome.exe', 'msedge.exe', 'firefox.exe', 'brave.exe', 'opera.exe', 'chrome', 'firefox'].includes(p.name.toLowerCase())).length,
         temp: tempVal ? Math.round(tempVal) : null,
         uptime: Math.round((Date.now() - startTime) / 1000),
         processes: topProcs,
@@ -146,7 +173,7 @@ async function startThreatMonitor() {
   const scan = async () => {
     try {
       const result = await runQuickThreatScan();
-      const conns = await getOpenConnections();
+      const conns = await analyzeNetworkConnections();
       threatsFound = result.findings.filter(f => f.level === 'warn').length;
       mainWindow?.webContents.send('threat-update', {
         score: result.score, findings: result.findings, conns
@@ -155,6 +182,26 @@ async function startThreatMonitor() {
   };
   // Delay first scan 10s so startup isn't slowed
   setTimeout(() => { scan(); threatInterval = setInterval(scan, 5 * 60 * 1000); }, 10000);
+
+  // Real-Time Directory Watchdog for OS Integrity
+  try {
+    if (process.platform === 'win32') {
+      const hostsPath = 'C:\\Windows\\System32\\drivers\\etc\\hosts';
+      if (fs.existsSync(hostsPath)) {
+        let watchTimeout;
+        fs.watch(hostsPath, (eventType) => {
+          if (watchTimeout) return; // Debounce triggers
+          watchTimeout = setTimeout(() => watchTimeout = null, 3000);
+          console.log(`[WATCHDOG] Integrity violation detected on Windows HOSTS file: ${eventType}`);
+          mainWindow?.webContents.send('threat-update', {
+            score: 0,
+            findings: [{ type: 'watchdog', level: 'warn', msg: `CRITICAL: The system HOSTS file was unexpectedly modified (${eventType})!` }],
+            conns: []
+          });
+        });
+      }
+    }
+  } catch (e) { console.error('Watchdog initialization failed:', e); }
 }
 
 // ── Reminder checker ──────────────────────────────────────────────────────────
@@ -174,6 +221,10 @@ ipcMain.handle('win-minimize', () => mainWindow?.minimize());
 ipcMain.handle('win-maximize', () =>
   mainWindow?.isMaximized() ? mainWindow.unmaximize() : mainWindow.maximize());
 ipcMain.handle('win-close', () => mainWindow?.close());
+ipcMain.on('window-drag', (e) => {
+  const win = BrowserWindow.fromWebContents(e.sender);
+  if (win) win.startWindowDrag();
+});
 
 // ── IPC: system info ──────────────────────────────────────────────────────────
 ipcMain.handle('get-sysinfo', async () => {
@@ -214,7 +265,7 @@ ipcMain.handle('clear-cache', async () => {
 
 ipcMain.handle('run-threat-scan', async () => {
   const result = await runQuickThreatScan();
-  const conns = await getOpenConnections();
+  const conns = await analyzeNetworkConnections();
   threatsFound = result.findings.filter(f => f.level === 'warn').length;
   mainWindow?.webContents.send('threat-update', { score: result.score, findings: result.findings, conns });
   return result;
@@ -266,6 +317,21 @@ ipcMain.handle('elevate-admin', async () =>
   })
 );
 
+// ── IPC: Firewall IP Blocking ──────────────────────────────────────────────────
+ipcMain.handle('block-ip', async (_e, ip) =>
+  new Promise(resolve => {
+    if (!ip) return resolve({ success: false, message: 'No IP provided' });
+    if (process.platform === 'win32') {
+      const cmd = `netsh advfirewall firewall add rule name="Cardinal-Block-${ip}" dir=in action=block remoteip="${ip}" & netsh advfirewall firewall add rule name="Cardinal-Block-${ip}" dir=out action=block remoteip="${ip}"`;
+      exec(`powershell -Command "Start-Process 'cmd.exe' -ArgumentList '/c ${cmd}' -Verb RunAs -WindowStyle Hidden"`, (err) => {
+        resolve({ success: !err });
+      });
+    } else {
+      resolve({ success: false, message: 'Firewall blocking natively only supported on Windows' });
+    }
+  })
+);
+
 // ── Persistent Browser State ──────────────────────────────────────────────────
 let persistentBrowser = null;
 let persistentPage = null;
@@ -274,6 +340,11 @@ app.on('before-quit', async () => {
   if (persistentBrowser) {
     try { await persistentBrowser.close(); } catch { }
   }
+  let cfg = {};
+  try { cfg = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'config.json'), 'utf8')); } catch { }
+  if (cfg.ollamaAuto && process.platform === 'win32') {
+    exec('cscript "D:\\Dev\\Artificial intelligence\\stop-ollama.vbs"', { shell: true }).unref();
+  }
 });
 
 // ── IPC: Browser automation (Puppeteer) ───────────────────────────────────────
@@ -281,7 +352,12 @@ ipcMain.handle('browser-auto', async (_e, { url, action, data }) => {
   try {
     if (!persistentBrowser) {
       const puppeteer = require('puppeteer');
-      persistentBrowser = await puppeteer.launch({ headless: 'new' });
+      const envoyPath = path.join(app.getPath('userData'), 'BrowserEnvoy');
+      if (!fs.existsSync(envoyPath)) fs.mkdirSync(envoyPath, { recursive: true });
+      persistentBrowser = await puppeteer.launch({
+        headless: 'new',
+        userDataDir: envoyPath
+      });
       persistentPage = await persistentBrowser.newPage();
     }
     await persistentPage.goto(url, { waitUntil: 'networkidle2', timeout: 20000 });
@@ -373,7 +449,7 @@ ipcMain.handle('ai-chat', async (_e, { messages, systemPrompt, model }) => {
 
   for (const m of tryModels) {
     try {
-      const res = await fetch('http://127.0.0.1:11434/api/chat', {
+      const res = await nativeFetch('http://127.0.0.1:11434/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -538,10 +614,11 @@ ipcMain.handle('get-open-ports', async () => {
   } catch { return []; }
 });
 
-ipcMain.handle('get-event-logs', async (_e, limit = 50) => {
+ipcMain.handle('get-event-logs', async (_e, { limit = 20, logName = 'System' } = {}) => {
   try {
     if (process.platform === 'win32') {
-      const { stdout } = await execAsync(`powershell -NoProfile -Command "Get-EventLog -LogName System -Newest ${limit} | ConvertTo-Json"`);
+      const targetLog = logName === 'Application' ? 'Application' : 'System';
+      const { stdout } = await execAsync(`powershell -NoProfile -Command "Get-EventLog -LogName ${targetLog} -Newest ${limit} -EntryType Error,Warning | Select-Object TimeGenerated, EntryType, Source, Message | ConvertTo-Json"`);
       return JSON.parse(stdout || '[]');
     }
     return [];
@@ -617,6 +694,15 @@ ipcMain.handle('transcribe-audio', async (_e, base64data) => {
 app.whenReady().then(() => {
   store.init(path.join(app.getPath('userData'), 'cardinal.json'));
   createWindow();
+
+  let cfg = {};
+  try { cfg = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'config.json'), 'utf8')); } catch { }
+  if (cfg.ollamaAuto && process.platform === 'win32') {
+    exec('cscript "D:\\Dev\\Artificial intelligence\\run-ollama.vbs"', { shell: true }, (err) => {
+      if (err) console.warn('Failed to auto-start Ollama:', err);
+    });
+  }
+
   startMonitoring();
   startThreatMonitor();
   startReminderCheck();

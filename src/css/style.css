@@ -96,8 +96,7 @@ body {
 .drag-region {
   position: absolute;
   inset: 0;
-  -webkit-app-region: drag;
-  pointer-events: none;
+  /* -webkit-app-region replaced by explicit JS `startWindowDrag` hooks to prevent native pointer overlay */
 }
 
 #layout {
