@@ -664,18 +664,38 @@
       });
     }
 
-    // Toggle selection/hover state frames
+    // Toggle selection/hover/resize state frames
     document.addEventListener('mouseover', (e) => {
       if (!e.target || !e.target.closest) return;
+
+      const bodyCursor = document.body.style.cursor;
+      const targetStyle = window.getComputedStyle(e.target);
       const isInteractable = e.target.closest('a, button, input, textarea, select, [contenteditable="true"], .clickable');
-      const style = window.getComputedStyle(e.target);
-      if (isInteractable || style.cursor === 'text' || style.cursor === 'pointer') {
+
+      // Clear specific modes first
+      cyberCursor.classList.remove('select-mode', 'hr-mode', 'vr-mode');
+
+      // 1. Check if body possesses a forced resize cursor (active drag)
+      if (bodyCursor === 'col-resize') {
+        cyberCursor.classList.add('hr-mode');
+        return;
+      } else if (bodyCursor === 'row-resize' || bodyCursor === 'ns-resize') {
+        cyberCursor.classList.add('vr-mode');
+        return;
+      }
+
+      // 2. Check hovered target
+      if (isInteractable || targetStyle.cursor === 'text' || targetStyle.cursor === 'pointer') {
         cyberCursor.classList.add('select-mode');
+      } else if (targetStyle.cursor === 'col-resize') {
+        cyberCursor.classList.add('hr-mode');
+      } else if (targetStyle.cursor === 'row-resize' || targetStyle.cursor === 'ns-resize') {
+        cyberCursor.classList.add('vr-mode');
       }
     });
 
     document.addEventListener('mouseout', (e) => {
-      cyberCursor.classList.remove('select-mode');
+      cyberCursor.classList.remove('select-mode', 'hr-mode', 'vr-mode');
     });
   }
 
@@ -1056,28 +1076,7 @@
     return `${pad(h)}:${pad(m)}:${pad(s)}`;
   }
 
-  // ── Eye Animation ─────────────────────────────────────────────────────────
-  const canvas = $('eyeCanvas');
-  if (canvas) {
-    const ctx = canvas.getContext('2d');
-    let frame = 0;
-    function animate() {
-      frame++;
-      ctx.clearRect(0, 0, 64, 44);
-      ctx.strokeStyle = 'var(--red)';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      const blink = Math.sin(frame * 0.05) > 0.98 ? 0 : 1;
-      ctx.ellipse(32, 22, 20, 12 * blink, 0, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.fillStyle = 'var(--red)';
-      ctx.beginPath();
-      ctx.arc(32 + Math.sin(frame * 0.02) * 5, 22, 6 * blink, 0, Math.PI * 2);
-      ctx.fill();
-      requestAnimationFrame(animate);
-    }
-    animate();
-  }
+
 
   // ── Resizers ──────────────────────────────────────────────────────────────
   function initResizer(resizerId, panelId, side) {
