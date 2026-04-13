@@ -268,6 +268,84 @@
       }
     }
 
+    @keyframes txtAnim {
+
+      0%,
+      6.66% {
+        background-image: url('assets/cursor/txt/txt-1.png');
+      }
+
+      6.67%,
+      13.32% {
+        background-image: url('assets/cursor/txt/txt-2.png');
+      }
+
+      13.33%,
+      19.99% {
+        background-image: url('assets/cursor/txt/txt-3.png');
+      }
+
+      20.00%,
+      26.65% {
+        background-image: url('assets/cursor/txt/txt-4.png');
+      }
+
+      26.66%,
+      33.32% {
+        background-image: url('assets/cursor/txt/txt-5.png');
+      }
+
+      33.33%,
+      39.98% {
+        background-image: url('assets/cursor/txt/txt-6.png');
+      }
+
+      39.99%,
+      46.65% {
+        background-image: url('assets/cursor/txt/txt-7.png');
+      }
+
+      46.66%,
+      53.31% {
+        background-image: url('assets/cursor/txt/txt-8.png');
+      }
+
+      53.32%,
+      59.98% {
+        background-image: url('assets/cursor/txt/txt-9.png');
+      }
+
+      59.99%,
+      66.64% {
+        background-image: url('assets/cursor/txt/txt-10.png');
+      }
+
+      66.65%,
+      73.31% {
+        background-image: url('assets/cursor/txt/txt-11.png');
+      }
+
+      73.32%,
+      79.97% {
+        background-image: url('assets/cursor/txt/txt-12.png');
+      }
+
+      79.98%,
+      86.64% {
+        background-image: url('assets/cursor/txt/txt-13.png');
+      }
+
+      86.65%,
+      93.30% {
+        background-image: url('assets/cursor/txt/txt-14.png');
+      }
+
+      93.31%,
+      100% {
+        background-image: url('assets/cursor/txt/txt-15.png');
+      }
+    }
+
     #cyber-cursor {
       position: fixed;
       pointer-events: none;
@@ -293,6 +371,10 @@
 
     #cyber-cursor.vr-mode {
       animation: vrAnim 0.8s infinite;
+    }
+
+    #cyber-cursor.txt-mode {
+      animation: txtAnim 0.8s infinite;
     }
   </style>
 </head>

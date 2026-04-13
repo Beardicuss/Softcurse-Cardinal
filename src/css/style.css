@@ -782,6 +782,8 @@ body {
   flex-direction: column;
   gap: 6px;
   min-height: 0;
+  cursor: text;
+  user-select: text;
 }
 
 .chat-msg {
@@ -790,6 +792,8 @@ body {
   font-size: 15px;
   line-height: 1.65;
   animation: msgIn 0.2s ease;
+  cursor: text;
+  user-select: text;
 }
 
 @keyframes msgIn {
@@ -972,6 +976,7 @@ body {
   color: var(--text-mid);
   outline: none;
   transition: border-color 0.2s;
+  cursor: text;
 }
 
 .chat-input::placeholder {

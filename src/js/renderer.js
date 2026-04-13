@@ -673,7 +673,7 @@
       const isInteractable = e.target.closest('a, button, input, textarea, select, [contenteditable="true"], .clickable');
 
       // Clear specific modes first
-      cyberCursor.classList.remove('select-mode', 'hr-mode', 'vr-mode');
+      cyberCursor.classList.remove('select-mode', 'hr-mode', 'vr-mode', 'txt-mode');
 
       // 1. Check if body possesses a forced resize cursor (active drag)
       if (bodyCursor === 'col-resize') {
@@ -685,7 +685,9 @@
       }
 
       // 2. Check hovered target
-      if (isInteractable || targetStyle.cursor === 'text' || targetStyle.cursor === 'pointer') {
+      if (targetStyle.cursor === 'text') {
+        cyberCursor.classList.add('txt-mode');
+      } else if (isInteractable || targetStyle.cursor === 'pointer') {
         cyberCursor.classList.add('select-mode');
       } else if (targetStyle.cursor === 'col-resize') {
         cyberCursor.classList.add('hr-mode');
@@ -695,7 +697,7 @@
     });
 
     document.addEventListener('mouseout', (e) => {
-      cyberCursor.classList.remove('select-mode', 'hr-mode', 'vr-mode');
+      cyberCursor.classList.remove('select-mode', 'hr-mode', 'vr-mode', 'txt-mode');
     });
   }
 
