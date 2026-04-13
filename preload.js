@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('api', {
   maximize: () => ipcRenderer.invoke('win-maximize'),
   close: () => ipcRenderer.invoke('win-close'),
   startDrag: () => ipcRenderer.send('window-drag'),
+  endDrag: () => ipcRenderer.send('window-drag-end'),
 
   // System info & monitor
   getSysInfo: () => ipcRenderer.invoke('get-sysinfo'),
@@ -62,7 +63,14 @@ contextBridge.exposeInMainWorld('api', {
   getOpenPorts: () => ipcRenderer.invoke('get-open-ports'),
   getNetworkDetails: () => ipcRenderer.invoke('get-network-details'),
   getEventLogs: (l) => ipcRenderer.invoke('get-event-logs', l),
-  transcribeAudio: (d) => ipcRenderer.invoke('transcribe-audio', d),
+  transcribeAudio: async (base64data) => {
+    // Write audio to a temp file first — passing large base64 blobs directly over
+    // IPC triggers Chromium's chunked_data_pipe errors (OnSizeReceived -2).
+    // A short temp file path string is safe to pass instead.
+    const tmpPath = await ipcRenderer.invoke('write-temp-audio', base64data);
+    if (!tmpPath) return { ok: false, error: 'Failed to write temp audio file.' };
+    return ipcRenderer.invoke('transcribe-audio', tmpPath);
+  },
 
   // Platform info — renderer can't access process.* directly
   platform: process.platform,

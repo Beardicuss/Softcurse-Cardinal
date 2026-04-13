@@ -5,7 +5,7 @@
   "author": "Softcurse Systems",
   "main": "main.js",
   "scripts": {
-    "start": "electron .",
+    "start": "electron --log-level=3 .",
     "build": "electron-builder --dir",
     "dist": "electron-builder"
   },
@@ -34,6 +34,7 @@
     "linux": {
       "target": "AppImage",
       "icon": "src/assets/cardinal_icon.png"
-    }
+    },
+    "extraMetadata": {}
   }
 }

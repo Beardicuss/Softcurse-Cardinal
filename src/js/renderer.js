@@ -648,7 +648,15 @@
     if (topBar) {
       topBar.addEventListener('mousedown', (e) => {
         if (e.target.closest('button, .clickable, select, input, .title-text, span, img')) return;
-        if (window.api && window.api.startDrag) window.api.startDrag();
+        if (window.api && window.api.startDrag) {
+          window.api.startDrag();
+          // Notify main process when drag ends so it can stop the poll interval
+          const onUp = () => {
+            window.api.endDrag();
+            window.removeEventListener('mouseup', onUp);
+          };
+          window.addEventListener('mouseup', onUp);
+        }
       });
       topBar.addEventListener('dblclick', (e) => {
         if (e.target.closest('button, .clickable, select, input, .title-text, span, img')) return;

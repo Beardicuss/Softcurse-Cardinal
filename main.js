@@ -1,19 +1,52 @@
-const { app, BrowserWindow, ipcMain, powerMonitor, shell, session } = require('electron');
+const { app, BrowserWindow, ipcMain, powerMonitor, shell, session, screen, net } = require('electron');
 const path = require('path');
 const si = require('systeminformation');
 const { exec } = require('child_process');
 const util = require('util');
 const execAsync = util.promisify(exec);
 const fs = require('fs');
-const http = require('http');
-const https = require('https');
+const http = require('http');   // kept for system.js geo-IP (GET only, no upload)
+const https = require('https'); // kept for system.js
 const { getActiveWindowTitle, runQuickThreatScan, analyzeNetworkConnections, clearSystemCache } = require('./src/js/system.js');
 
+// ── HTTP fetch using electron.net ─────────────────────────────────────────────
+// Node's http/https module causes Chromium to open ChunkedDataPipeUploadDataStream
+// objects internally. When those pipes are torn down after a response, Chromium
+// logs "OnSizeReceived failed with Error: -2" because the pipe closed before the
+// size callback fired. electron.net.fetch() is Chromium-native and handles
+// chunked responses correctly without triggering those log errors.
+// Must be called after app is ready; for pre-ready calls we fall back to Node http.
 function nativeFetch(url, opts = {}) {
+  // Use electron net.fetch if app is ready (it handles chunked responses natively)
+  if (app.isReady()) {
+    const { method = 'GET', headers = {}, body } = opts;
+    const bodyBuf = body
+      ? Buffer.from(typeof body === 'string' ? body : JSON.stringify(body))
+      : null;
+    return net.fetch(url, {
+      method,
+      headers: {
+        ...headers,
+        ...(bodyBuf ? { 'Content-Length': String(bodyBuf.length) } : {})
+      },
+      body: bodyBuf || undefined
+    }).then(res => ({
+      ok: res.ok,
+      status: res.status,
+      json: () => res.json(),
+      text: () => res.text()
+    }));
+  }
+  // Fallback for pre-ready (shouldn't normally be called)
   return new Promise((resolve, reject) => {
     const { method = 'GET', headers = {}, body } = opts;
+    const bodyBuf = body
+      ? Buffer.from(typeof body === 'string' ? body : JSON.stringify(body))
+      : null;
+    const mergedHeaders = { ...headers };
+    if (bodyBuf) mergedHeaders['Content-Length'] = bodyBuf.length;
     const client = url.startsWith('https') ? https : http;
-    const req = client.request(url, { method, headers }, res => {
+    const req = client.request(url, { method, headers: mergedHeaders }, res => {
       let data = [];
       res.on('data', chunk => data.push(chunk));
       res.on('end', () => {
@@ -27,12 +60,11 @@ function nativeFetch(url, opts = {}) {
       });
     });
     req.on('error', err => reject(err));
-    if (body) req.write(typeof body === 'string' ? body : JSON.stringify(body));
+    if (bodyBuf) req.write(bodyBuf);
     req.end();
   });
 }
 
-// ── Abort helper — avoids Chromium chunked_data_pipe error from AbortSignal.timeout ──
 function fetchWithTimeout(url, opts = {}, ms = 25000) {
   return Promise.race([
     nativeFetch(url, opts),
@@ -119,6 +151,15 @@ function createWindow() {
 
 // ── System monitor (2s polling) ───────────────────────────────────────────────
 async function startMonitoring() {
+  // Cache activeWindow separately — getActiveWindowTitle() spawns a PowerShell
+  // subprocess which conflicts with Chromium's chunked_data_pipe and generates
+  // repeated OnSizeReceived -2 errors when called every 2s. Poll it every 10s instead.
+  let cachedActiveWindow = 'Desktop';
+  getActiveWindowTitle().then(w => { cachedActiveWindow = w; }).catch(() => {});
+  setInterval(() => {
+    getActiveWindowTitle().then(w => { cachedActiveWindow = w; }).catch(() => {});
+  }, 10000);
+
   const push = async () => {
     try {
       const [load, mem, nets, procs, disks, temp] = await Promise.all([
@@ -142,8 +183,9 @@ async function startMonitoring() {
           mem: Math.round(p.memVsz / 1024)
         }));
 
-      const activeWindow = await getActiveWindowTitle().catch(() => 'Unknown');
-
+      // Keep payload small — large Mojo pipe transfers trigger OnSizeReceived
+      // errors in Chromium's network service. Cap process names to avoid
+      // crossing the inline-transfer threshold on every 2s push.
       mainWindow?.webContents.send('system-update', {
         cpu: Math.round(load.currentLoad),
         ram: Math.round(mem.used / mem.total * 100),
@@ -154,11 +196,11 @@ async function startMonitoring() {
         upload: +(net.tx_sec / 1048576 || 0).toFixed(2),
         download: +(net.rx_sec / 1048576 || 0).toFixed(2),
         netConns: procs.list.length,
-        browserProcs: procs.list.filter(p => ['chrome.exe', 'msedge.exe', 'firefox.exe', 'brave.exe', 'opera.exe', 'chrome', 'firefox'].includes(p.name.toLowerCase())).length,
+        browserProcs: procs.list.filter(p => ['chrome.exe','msedge.exe','firefox.exe','brave.exe','chrome','firefox'].includes(p.name.toLowerCase())).length,
         temp: tempVal ? Math.round(tempVal) : null,
         uptime: Math.round((Date.now() - startTime) / 1000),
-        processes: topProcs,
-        activeWindow,
+        processes: topProcs.slice(0, 3).map(p => ({ name: p.name.slice(0, 20), pid: p.pid, cpu: p.cpu, mem: p.mem })),
+        activeWindow: cachedActiveWindow.slice(0, 60),
         spaceFreed,
         threatsFound
       });
@@ -221,9 +263,33 @@ ipcMain.handle('win-minimize', () => mainWindow?.minimize());
 ipcMain.handle('win-maximize', () =>
   mainWindow?.isMaximized() ? mainWindow.unmaximize() : mainWindow.maximize());
 ipcMain.handle('win-close', () => mainWindow?.close());
+// startWindowDrag() was removed in Electron 35+.
+// Replacement: on mousedown we record the cursor position and window position,
+// then poll on a tight interval until the mouse button is released, moving the
+// window by the delta each tick. This gives smooth frameless-window dragging
+// without any native API.
 ipcMain.on('window-drag', (e) => {
   const win = BrowserWindow.fromWebContents(e.sender);
-  if (win) win.startWindowDrag();
+  if (!win || win.isMaximized()) return;
+  const startCursor = screen.getCursorScreenPoint();
+  const [startWinX, startWinY] = win.getPosition();
+  let lastX = startCursor.x, lastY = startCursor.y;
+  const poll = setInterval(() => {
+    try {
+      const cur = screen.getCursorScreenPoint();
+      // Stop if mouse button released (no button state available, so we use
+      // a stationary threshold — renderer sends 'window-drag-end' on mouseup)
+      const dx = cur.x - lastX, dy = cur.y - lastY;
+      if (dx === 0 && dy === 0) return;
+      const [wx, wy] = win.getPosition();
+      win.setPosition(wx + dx, wy + dy);
+      lastX = cur.x; lastY = cur.y;
+    } catch { clearInterval(poll); }
+  }, 8); // ~120fps
+  // Clean up on mouseup (sent from renderer) or after 30s safety timeout
+  const cleanup = () => clearInterval(poll);
+  ipcMain.once('window-drag-end', cleanup);
+  setTimeout(cleanup, 30000);
 });
 
 // ── IPC: system info ──────────────────────────────────────────────────────────
@@ -656,11 +722,40 @@ ipcMain.handle('import-plugin', async () => {
   }
 });
 
-ipcMain.handle('transcribe-audio', async (_e, base64data) => {
+// ── IPC: write audio blob to temp file (avoids passing large base64 over IPC) ─
+// Passing a multi-MB base64 string through Electron IPC triggers Chromium's
+// chunked_data_pipe_upload_data_stream error (OnSizeReceived -2) because the
+// renderer-side IPC pipe chokes on large binary payloads. The fix: write the
+// data to a temp file here in the main process, return the short path string,
+// then transcribe-audio reads the file directly — no large payload ever crosses IPC.
+ipcMain.handle('write-temp-audio', async (_e, base64data) => {
+  try {
+    const os = require('os');
+    const tmpDir = app.getPath('temp');
+    const tmpFile = path.join(tmpDir, `cardinal-audio-${Date.now()}.webm`);
+    fs.writeFileSync(tmpFile, Buffer.from(base64data, 'base64'));
+    return tmpFile;
+  } catch (e) {
+    console.error('write-temp-audio error:', e.message);
+    return null;
+  }
+});
+
+ipcMain.handle('transcribe-audio', async (_e, tmpFilePath) => {
   let cfg = {};
   try { cfg = JSON.parse(fs.readFileSync(configPath(), 'utf8')); } catch { }
 
   if (!cfg.geminiKey) return { ok: false, error: 'Gemini API key is required inside settings to enable Microphone STT.' };
+
+  let base64data;
+  try {
+    base64data = fs.readFileSync(tmpFilePath).toString('base64');
+  } catch (e) {
+    return { ok: false, error: `Could not read temp audio file: ${e.message}` };
+  } finally {
+    // Always clean up the temp file
+    try { fs.unlinkSync(tmpFilePath); } catch { }
+  }
 
   try {
     const gapi = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${cfg.geminiKey}`;
