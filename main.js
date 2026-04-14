@@ -20,16 +20,11 @@ function nativeFetch(url, opts = {}) {
   // Use electron net.fetch if app is ready (it handles chunked responses natively)
   if (app.isReady()) {
     const { method = 'GET', headers = {}, body } = opts;
-    const bodyBuf = body
-      ? Buffer.from(typeof body === 'string' ? body : JSON.stringify(body))
-      : null;
+    const bodyStr = body ? (typeof body === 'string' ? body : JSON.stringify(body)) : undefined;
     return net.fetch(url, {
       method,
-      headers: {
-        ...headers,
-        ...(bodyBuf ? { 'Content-Length': String(bodyBuf.length) } : {})
-      },
-      body: bodyBuf || undefined
+      headers,
+      body: bodyStr
     }).then(res => ({
       ok: res.ok,
       status: res.status,
@@ -155,9 +150,9 @@ async function startMonitoring() {
   // subprocess which conflicts with Chromium's chunked_data_pipe and generates
   // repeated OnSizeReceived -2 errors when called every 2s. Poll it every 10s instead.
   let cachedActiveWindow = 'Desktop';
-  getActiveWindowTitle().then(w => { cachedActiveWindow = w; }).catch(() => {});
+  getActiveWindowTitle().then(w => { cachedActiveWindow = w; }).catch(() => { });
   setInterval(() => {
-    getActiveWindowTitle().then(w => { cachedActiveWindow = w; }).catch(() => {});
+    getActiveWindowTitle().then(w => { cachedActiveWindow = w; }).catch(() => { });
   }, 10000);
 
   const push = async () => {
@@ -196,7 +191,7 @@ async function startMonitoring() {
         upload: +(net.tx_sec / 1048576 || 0).toFixed(2),
         download: +(net.rx_sec / 1048576 || 0).toFixed(2),
         netConns: procs.list.length,
-        browserProcs: procs.list.filter(p => ['chrome.exe','msedge.exe','firefox.exe','brave.exe','chrome','firefox'].includes(p.name.toLowerCase())).length,
+        browserProcs: procs.list.filter(p => ['chrome.exe', 'msedge.exe', 'firefox.exe', 'brave.exe', 'chrome', 'firefox'].includes(p.name.toLowerCase())).length,
         temp: tempVal ? Math.round(tempVal) : null,
         uptime: Math.round((Date.now() - startTime) / 1000),
         processes: topProcs.slice(0, 3).map(p => ({ name: p.name.slice(0, 20), pid: p.pid, cpu: p.cpu, mem: p.mem })),
@@ -539,7 +534,7 @@ ipcMain.handle('ai-chat', async (_e, { messages, systemPrompt, model }) => {
 
   if (cfg.geminiKey) {
     try {
-      const gapi = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${cfg.geminiKey}`;
+      const gapi = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${cfg.geminiKey}`;
       const res = await fetchWithTimeout(gapi, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -556,6 +551,23 @@ ipcMain.handle('ai-chat', async (_e, { messages, systemPrompt, model }) => {
         const text = d.candidates?.[0]?.content?.parts?.[0]?.text || '';
         return { ok: true, text: text || '(Empty response from Gemini. Check terminal logs.)', provider: 'gemini' };
       }
+    } catch (e) {
+      console.error('Gemini fallback failed:', e);
+    }
+  }
+
+  if (cfg.groqKey) {
+    try {
+      const res = await fetchWithTimeout('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${cfg.groqKey}` },
+        body: JSON.stringify({ model: 'llama-3.3-70b-versatile', messages: [{ role: 'system', content: systemPrompt }, ...messages.filter(m => !m.content.includes('No AI provider'))] })
+      });
+      if (res.ok) {
+        const d = await res.json();
+        const text = d.choices?.[0]?.message?.content || '';
+        return { ok: true, text: text || '(Empty response from Groq)', provider: 'groq' };
+      }
     } catch { }
   }
 
@@ -570,20 +582,6 @@ ipcMain.handle('ai-chat', async (_e, { messages, systemPrompt, model }) => {
         const d = await res.json();
         const text = d.choices?.[0]?.message?.content || '';
         return { ok: true, text: text || '(Empty response from OpenRouter)', provider: 'openrouter' };
-      }
-    } catch { }
-  }
-
-  if (cfg.anthropicKey) {
-    try {
-      const res = await fetchWithTimeout('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': cfg.anthropicKey, 'anthropic-version': '2023-06-01' },
-        body: JSON.stringify({ model: 'claude-3-5-haiku-20241022', max_tokens: 1024, system: systemPrompt, messages }),
-      });
-      if (res.ok) {
-        const d = await res.json();
-        return { ok: true, text: d.content?.[0]?.text || '', provider: 'anthropic' };
       }
     } catch { }
   }

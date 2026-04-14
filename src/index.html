@@ -350,8 +350,8 @@
       position: fixed;
       pointer-events: none;
       z-index: 999999;
-      width: 48px;
-      height: 48px;
+      width: 32px;
+      height: 32px;
       background-position: left top;
       background-size: contain;
       background-repeat: no-repeat;
@@ -363,18 +363,25 @@
 
     #cyber-cursor.select-mode {
       animation: selectAnim 0.45s infinite;
+      /* If "hand" tip is slightly right of center, adjust if necessary, else 0 */
     }
 
     #cyber-cursor.hr-mode {
       animation: hrAnim 0.8s infinite;
+      margin-left: -16px;
+      margin-top: -16px;
     }
 
     #cyber-cursor.vr-mode {
       animation: vrAnim 0.8s infinite;
+      margin-left: -16px;
+      margin-top: -16px;
     }
 
     #cyber-cursor.txt-mode {
       animation: txtAnim 0.8s infinite;
+      margin-left: -16px;
+      margin-top: -16px;
     }
   </style>
 </head>
@@ -740,12 +747,12 @@
             <input type="password" id="cfgGemini" class="setting-input" placeholder="AIza..." />
           </div>
           <div class="setting-group">
-            <label class="setting-label">OpenRouter API Key (fallback)</label>
-            <input type="password" id="cfgOpenRouter" class="setting-input" placeholder="sk-or-v1-..." />
+            <label class="setting-label">Groq API Key (fallback 1)</label>
+            <input type="password" id="cfgGroq" class="setting-input" placeholder="gsk_..." />
           </div>
           <div class="setting-group">
-            <label class="setting-label" data-i18n="anthropic_key">Anthropic API Key (fallback)</label>
-            <input type="password" id="cfgAnthropic" class="setting-input" placeholder="sk-ant-..." />
+            <label class="setting-label">OpenRouter API Key (fallback 2)</label>
+            <input type="password" id="cfgOpenRouter" class="setting-input" placeholder="sk-or-v1-..." />
           </div>
           <div class="setting-group" style="margin-bottom:0">
             <label class="setting-label" data-i18n="openai_key">OpenAI API Key (fallback)</label>

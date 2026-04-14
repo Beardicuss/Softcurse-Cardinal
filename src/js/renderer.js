@@ -629,32 +629,96 @@
   // WIRE UP UI CONTROLS
   // ═══════════════════════════════════════════════════════════════════════
 
-  // Global Cyber S Custom Cursor Tracker
+  // ── Custom Cursor System ────────────────────────────────────────────────
+  // FIX: getComputedStyle always returns 'none' because of `* { cursor: none !important }`.
+  // So we NEVER check computed cursor. Instead we detect element type by selector matching.
+  // We use mousemove (not mouseover/mouseout) to avoid child-entry flicker.
+
   const cyberCursor = document.getElementById('cyber-cursor');
   if (cyberCursor) {
+
+    // Track drag state for resizers
+    let isDraggingHR = false;
+    let isDraggingVR = false;
+
+    // Selectors that should show txt cursor
+    const TXT_SELECTORS = [
+      '.chat-log', '.chat-msg', '.msg-body', '.msg-label',
+      '.term-log', '.term-line',
+      'input[type="text"]', 'input:not([type])', 'textarea',
+      '.chat-input', '#chatInput', '.setting-input',
+      '.file-path-input', '#file-path-input',
+      '.holo-data', '.hd-val',
+      '.proc-name', '.proc-pid', '.pbar-val',
+      '.net-val', '.vital-val', '.metric-val', '.metric-sub',
+      '.vital-lbl', '.section-label', '.panel-header'
+    ].join(', ');
+
+    // Selectors that show pointer/select cursor
+    const PTR_SELECTORS = [
+      'button', 'a', 'select',
+      '.lang-btn', '.wc-btn', '.send-btn', '.mic-btn',
+      '.qa-btn', '.tab-btn', '.ctx-item', '.toast-btn',
+      '.file-item', '.proc-item', '.net-item',
+      '.term-clear-btn', '.overlay-close',
+      '[onclick]', '.clickable'
+    ].join(', ');
+
+    // Resizer selectors
+    const HR_SELECTORS = '.resizer, #resizer-left, #resizer-right, [data-cursor="hr"]';
+    const VR_SELECTORS = '[data-cursor="vr"]';
+
+    function updateCursorMode(target) {
+      cyberCursor.classList.remove('select-mode', 'hr-mode', 'vr-mode', 'txt-mode');
+
+      // Resizer drag takes priority
+      if (isDraggingHR) { cyberCursor.classList.add('hr-mode'); return; }
+      if (isDraggingVR) { cyberCursor.classList.add('vr-mode'); return; }
+
+      if (!target) return;
+
+      // Check from most specific to least specific
+      if (target.closest && target.closest(HR_SELECTORS)) {
+        cyberCursor.classList.add('hr-mode');
+      } else if (target.closest && target.closest(VR_SELECTORS)) {
+        cyberCursor.classList.add('vr-mode');
+      } else if (target.closest && target.closest(PTR_SELECTORS)) {
+        cyberCursor.classList.add('select-mode');
+      } else if (target.matches && (target.matches(TXT_SELECTORS) || (target.closest && target.closest(TXT_SELECTORS)))) {
+        cyberCursor.classList.add('txt-mode');
+      }
+    }
+
+    let lastTarget = null;
+
+    // mousemove — position + mode detection in one shot, no flicker
     document.addEventListener('mousemove', (e) => {
-      // Use requestAnimationFrame natively inside browser engine if performance drops
-      // but direct sub-pixel offset application works best for 120hz/144hz UI
       cyberCursor.style.left = e.clientX + 'px';
       cyberCursor.style.top = e.clientY + 'px';
+
+      // Prevent extreme lag when moving mouse within the same element
+      if (e.target !== lastTarget) {
+        lastTarget = e.target;
+        updateCursorMode(e.target);
+      }
     }, { passive: true });
 
-    // Add glowing hover/click reactions
+    // Click scale reaction
     document.addEventListener('mousedown', () => cyberCursor.style.transform = 'scale(0.85)');
     document.addEventListener('mouseup', () => cyberCursor.style.transform = 'scale(1)');
 
-    // Custom pure-JS Window Dragging Hook replacing native `-webkit-app-region: drag`
+    // Expose drag state setters so resizer logic can set hr/vr mode
+    window._cursorSetHR = (on) => { isDraggingHR = on; updateCursorMode(lastTarget); };
+    window._cursorSetVR = (on) => { isDraggingVR = on; updateCursorMode(lastTarget); };
+
+    // Window drag via topbar (replaces -webkit-app-region)
     const topBar = document.getElementById('topbar');
     if (topBar) {
       topBar.addEventListener('mousedown', (e) => {
         if (e.target.closest('button, .clickable, select, input, .title-text, span, img')) return;
         if (window.api && window.api.startDrag) {
           window.api.startDrag();
-          // Notify main process when drag ends so it can stop the poll interval
-          const onUp = () => {
-            window.api.endDrag();
-            window.removeEventListener('mouseup', onUp);
-          };
+          const onUp = () => { window.api.endDrag(); window.removeEventListener('mouseup', onUp); };
           window.addEventListener('mouseup', onUp);
         }
       });
@@ -663,61 +727,50 @@
         if (window.api && window.api.maximize) window.api.maximize();
       });
     }
-
-    // Toggle selection/hover/resize state frames
-    document.addEventListener('mouseover', (e) => {
-      if (!e.target || !e.target.closest) return;
-
-      const bodyCursor = document.body.style.cursor;
-      const targetStyle = window.getComputedStyle(e.target);
-      const isInteractable = e.target.closest('a, button, input, textarea, select, [contenteditable="true"], .clickable');
-
-      // Clear specific modes first
-      cyberCursor.classList.remove('select-mode', 'hr-mode', 'vr-mode', 'txt-mode');
-
-      // 1. Check if body possesses a forced resize cursor (active drag)
-      if (bodyCursor === 'col-resize') {
-        cyberCursor.classList.add('hr-mode');
-        return;
-      } else if (bodyCursor === 'row-resize' || bodyCursor === 'ns-resize') {
-        cyberCursor.classList.add('vr-mode');
-        return;
-      }
-
-      // 2. Check hovered target
-      if (targetStyle.cursor === 'text') {
-        cyberCursor.classList.add('txt-mode');
-      } else if (isInteractable || targetStyle.cursor === 'pointer') {
-        cyberCursor.classList.add('select-mode');
-      } else if (targetStyle.cursor === 'col-resize') {
-        cyberCursor.classList.add('hr-mode');
-      } else if (targetStyle.cursor === 'row-resize' || targetStyle.cursor === 'ns-resize') {
-        cyberCursor.classList.add('vr-mode');
-      }
-    });
-
-    document.addEventListener('mouseout', (e) => {
-      cyberCursor.classList.remove('select-mode', 'hr-mode', 'vr-mode', 'txt-mode');
-    });
   }
 
   // Window Resizers (Drag-And-Drop)
+  // Resizers — notify cursor system via window._cursorSetHR so hr-mode stays active during drag
   const resizerLeft = $('resizer-left');
   const panelLeft = $('panel-left');
   if (resizerLeft && panelLeft) {
     let isResizing = false;
-    resizerLeft.addEventListener('mousedown', e => { isResizing = true; document.body.style.cursor = 'col-resize'; e.preventDefault(); });
-    window.addEventListener('mousemove', e => { if (isResizing) { const w = Math.max(200, Math.min(e.clientX, window.innerWidth / 2)); panelLeft.style.width = w + 'px'; } });
-    window.addEventListener('mouseup', () => { isResizing = false; document.body.style.cursor = 'default'; });
+    resizerLeft.addEventListener('mousedown', e => {
+      isResizing = true;
+      if (window._cursorSetHR) window._cursorSetHR(true);
+      e.preventDefault();
+    });
+    window.addEventListener('mousemove', e => {
+      if (!isResizing) return;
+      const w = Math.max(160, Math.min(e.clientX - 10, window.innerWidth / 2));
+      panelLeft.style.width = w + 'px';
+    });
+    window.addEventListener('mouseup', () => {
+      if (!isResizing) return;
+      isResizing = false;
+      if (window._cursorSetHR) window._cursorSetHR(false);
+    });
   }
 
   const resizerRight = $('resizer-right');
   const panelRight = $('panel-right');
   if (resizerRight && panelRight) {
     let isResizing = false;
-    resizerRight.addEventListener('mousedown', e => { isResizing = true; document.body.style.cursor = 'col-resize'; e.preventDefault(); });
-    window.addEventListener('mousemove', e => { if (isResizing) { const w = Math.max(180, Math.min(window.innerWidth - e.clientX, window.innerWidth / 2)); panelRight.style.width = w + 'px'; } });
-    window.addEventListener('mouseup', () => { isResizing = false; document.body.style.cursor = 'default'; });
+    resizerRight.addEventListener('mousedown', e => {
+      isResizing = true;
+      if (window._cursorSetHR) window._cursorSetHR(true);
+      e.preventDefault();
+    });
+    window.addEventListener('mousemove', e => {
+      if (!isResizing) return;
+      const w = Math.max(140, Math.min(window.innerWidth - e.clientX - 10, window.innerWidth / 2));
+      panelRight.style.width = w + 'px';
+    });
+    window.addEventListener('mouseup', () => {
+      if (!isResizing) return;
+      isResizing = false;
+      if (window._cursorSetHR) window._cursorSetHR(false);
+    });
   }
 
   // Chat input
@@ -969,7 +1022,7 @@
     try {
       const cfg = await window.api.getConfig().catch(() => ({}));
       if ($('cfgName')) $('cfgName').value = cfg.userName || '';
-      if ($('cfgAnthropic')) $('cfgAnthropic').value = cfg.anthropicKey || '';
+      if ($('cfgGroq')) $('cfgGroq').value = cfg.groqKey || '';
       if ($('cfgOpenai')) $('cfgOpenai').value = cfg.openaiKey || '';
       if ($('cfgGemini')) $('cfgGemini').value = cfg.geminiKey || '';
       if ($('cfgOpenRouter')) $('cfgOpenRouter').value = cfg.openRouterKey || '';
@@ -1039,7 +1092,7 @@
     try {
       const cfg = {
         userName: $('cfgName')?.value.trim() || '',
-        anthropicKey: $('cfgAnthropic')?.value.trim() || '',
+        groqKey: $('cfgGroq')?.value.trim() || '',
         openaiKey: $('cfgOpenai')?.value.trim() || '',
         geminiKey: $('cfgGemini')?.value.trim() || '',
         openRouterKey: $('cfgOpenRouter')?.value.trim() || '',
@@ -1080,25 +1133,7 @@
 
 
 
-  // ── Resizers ──────────────────────────────────────────────────────────────
-  function initResizer(resizerId, panelId, side) {
-    const resizer = $(resizerId);
-    const panel = $(panelId);
-    if (!resizer || !panel) return;
-    let startX, startWidth;
-    resizer.onmousedown = e => {
-      startX = e.clientX;
-      startWidth = panel.offsetWidth;
-      document.onmousemove = e => {
-        const delta = e.clientX - startX;
-        const newWidth = side === 'left' ? startWidth + delta : startWidth - delta;
-        panel.style.width = Math.min(Math.max(newWidth, 150), 450) + 'px';
-      };
-      document.onmouseup = () => { document.onmousemove = document.onmouseup = null; };
-    };
-  }
-  initResizer('resizer-left', 'panel-left', 'left');
-  initResizer('resizer-right', 'panel-right', 'right');
+  // Resizer logic handled above with cursor integration
 
   // ── Boot ──────────────────────────────────────────────────────────────────
   try {
